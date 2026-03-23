@@ -1,0 +1,16 @@
+[requires]
+ffmpeg/4.4.4
+opencv/4.10.0
+stb/cci.20240531
+glm/cci.20230113
+openjpeg/2.5.2
+libwebp/1.3.2
+[options]
+opencv/*:with_ffmpeg=False
+opencv/*:with_webp=False
+[generators]
+CMakeDeps
+CMakeToolchain
+
+[layout]
+cmake_layout

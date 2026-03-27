@@ -56,6 +56,30 @@ set(INCLUDE_DIRS
 file(GLOB_RECURSE LIBRARY_SOURCE_FILES ${PROJECT_ROOT_DIR}/LearnAV/*.cpp)
 # 创建静态库
 add_library(${PROJECT_NAME} STATIC ${LIBRARY_SOURCE_FILES}
+        AV/src/Core/TaskPool.cpp
+        AV/src/Core/TaskPool.h
+        AV/src/Reader/Interface/IDeMuxer.h
+        AV/src/Define/BaseDef.h
+        AV/src/Define/IAVPacket.h
+        AV/src/Reader/DeMuxer.cpp
+        AV/src/Reader/DeMuxer.h
+        AV/src/Core/SyncNotifier.cpp
+        AV/src/Core/SyncNotifier.h
+        AV/src/Reader/MiniDecoder.cpp
+        AV/src/Reader/MiniDecoder.h
+        AV/src/Define/IAudioSamples.h
+        AV/src/Define/IVideoFrame.h
+        AV/include/IGLContext.h
+        AV/src/Engine/GLContext.cpp
+        AV/src/Reader/Interface/IVideoDecoder.h
+        AV/src/Reader/Interface/IAudioDecoder.h
+        AV/src/Reader/VideoDecoder.cpp
+        AV/src/Reader/VideoDecoder.h
+        AV/src/Reader/AudioDecoder.cpp
+        AV/src/Reader/AudioDecoder.h
+        AV/src/Reader/Interface/IFileReader.h
+        AV/src/Reader/FileReader.cpp
+        AV/src/Reader/FileReader.h
 
 )
 # 为静态库添加头文件路径

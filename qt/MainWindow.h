@@ -5,25 +5,45 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
-
-#include <QMainWindow>
-#include <QMouseEvent>
-#include <QLabel>
-#include <QResizeEvent>
-#include <QSlider>
-#include <QPushButton>
-#include <iostream>
+#include <QCloseEvent>
 #include <QFile>
 #include <QFileDialog>
+#include <QFrame>
+#include <QLabel>
+#include <QLineEdit>
+#include <QMainWindow>
+#include <QMouseEvent>
+#include <QPushButton>
+#include <QResizeEvent>
+#include <QSlider>
+#include <QTimer>
+
+#include <iostream>
+
+#include "../AV/src/Engine/AVSynchronizer.h"
+#include "../AV/src/Network/NetworkSession.h"
+#include "../AV/src/Reader/Interface/IFileReader.h"
+#include "./UI/ClickableSlider.h"
 #include "./UI/PlayerWidget.h"
 #include "UI/ControllerWidget.h"
 
-class MainWindow : public QMainWindow {
+namespace av {
+    class FileReader;
+}
+
+class MainWindow : public QMainWindow, public av::IFileReader::Listener {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
+
+    void OnFileReaderNotifyAudioSamples(std::shared_ptr<av::IAudioSamples> audioSamples) override;
+    void OnFileReaderNotifyVideoFrame(std::shared_ptr<av::IVideoFrame> videoFrame) override;
+    void OnFileReaderNotifyAudioFinished() override;
+    void OnFileReaderNotifyVideoFinished() override;
+
 protected:
+    void closeEvent(QCloseEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
@@ -32,24 +52,40 @@ protected:
 
 private slots:
     void onSliderMoved(int value);
+    void onImportRequested(const QString& filePath);
+    void onNetworkPlayRequested();
+    void onNetworkStopRequested();
+    void onPlayToggled(bool playing);
+    void onTick();
 
 private:
-    //核心显示组件
-    //QWidget* m_playerWidget = nullptr;
-    QSlider* m_progressSlider = nullptr;
-    PlayerWidget* m_playerWidget= nullptr;
-    // //底部按钮组件
-    // QPushButton* m_btnPlay = nullptr;
-    // QPushButton* m_btnRecord = nullptr;
-    // QPushButton* m_btnStop = nullptr;
-    // //滤镜组件
-    // QPushButton* m_btnFilterFlip = nullptr;
-    // QPushButton* m_btnFilterGray = nullptr;
-    // QPushButton* m_btnFilterInvert = nullptr;
-    // QPushButton* m_btnFilterSticker = nullptr;
+    void createFileReader();
+    void releaseFileReader();
+    void startPlayback(const QString& filePath);
+    void updateProgress();
+    void appendDebugMessage(const QString& message);
+    void refreshNetworkPanel();
+
+    ClickableSlider* m_progressSlider = nullptr;
+    QWidget* m_sidePanel = nullptr;
+    PlayerWidget* m_playerWidget = nullptr;
+    QLabel* m_currentSourceValueLabel = nullptr;
+    QLabel* m_networkStatusValueLabel = nullptr;
+    QLabel* m_errorValueLabel = nullptr;
+    QLabel* m_debugLabel = nullptr;
+    QLineEdit* m_networkUrlEdit = nullptr;
+    QPushButton* m_networkPlayButton = nullptr;
+    QPushButton* m_networkStopButton = nullptr;
     ControllerWidget* m_controllerWidget{nullptr};
+    QTimer m_renderTimer;
+    QString m_currentFilePath;
+    bool m_isPlaying{false};
+    bool m_hasOpenedFile{false};
+    float m_durationSeconds{0.0f};
+    QStringList m_debugMessages;
+    av::NetworkSession m_networkSession;
+    av::AVSynchronizer m_synchronizer;
+    av::FileReader* m_fileReader{nullptr};
 };
-
-
 
 #endif //MAINWINDOW_H

@@ -159,6 +159,10 @@ namespace av {
             av_packet_unref(&packet);
         } else if (ret == AVERROR_EOF) {
             m_paused = true;
+            std::lock_guard<std::recursive_mutex> lock(m_listenerMutex);
+            if (m_listener) {
+                m_listener->OnDeMuxEOF();
+            }
         } else {
             return false;
         }

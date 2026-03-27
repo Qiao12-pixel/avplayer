@@ -97,10 +97,19 @@ namespace av {
 
     void FileReader::OnDeMuxEOF() {
         std::cout << "FileReader::OnDeMuxEOF" << std::endl;
+        std::lock_guard<std::recursive_mutex> lock(m_listenerMutex);
+        if (m_listener) {
+            m_listener->OnFileReaderNotifyVideoFinished();
+        }
     }
 
     void FileReader::OnDeMuxError(int code, const char* msg) {
         std::cout << "FileReader::OnDeMuxError" << std::endl;
+        std::lock_guard<std::recursive_mutex> lock(m_listenerMutex);
+        if (m_listener) {
+            // 这里借用 VideoFinished 当作整个流水线结束的信号
+            m_listener->OnFileReaderNotifyVideoFinished();
+        }
     }
     void FileReader::OnNotifyAudioStream(struct AVStream *stream) {
         if (m_audioDecoder) {

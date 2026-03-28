@@ -4,26 +4,39 @@
 
 #ifndef CONTROLLERWIDGET_H
 #define CONTROLLERWIDGET_H
+
 #include <qtmetamacros.h>
+#include <QHBoxLayout>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QWidget>
-#include <QHBoxLayout>
-#include <QMessageBox>
-class ControllerWidget : public QWidget{
+
+class ControllerWidget : public QWidget {
     Q_OBJECT
 
 public:
     explicit ControllerWidget(QWidget* parent);
     ~ControllerWidget() override;
+
+    void SetPlaying(bool playing);
+    void SetRecording(bool recording);
+    void SetRecordEnabled(bool enabled);
+
+signals:
+    void importRequested(const QString& filePath);
+    void playToggled(bool playing);
+    void recordToggled(bool recording);
+    void stickerAssetSwitchRequested();
+    void flipFilterToggled(bool enabled);
+    void grayFilterToggled(bool enabled);
+    void invertFilterToggled(bool enabled);
+    void stickerFilterToggled(bool enabled);
+
 private slots:
     void onImportBtnClicked();
-    // void onPlayBtnClicked();
-    // void onExportBtnClicked();
-    // void onVideoFilterFlipVerticalBtnClicked();
-    // void onVideoFilterGrayBtnClicked();
-    // void onVideoFilterInvertBtnClicked();
-    // void onVideoFilterStickerBtnClicked();
+    void onPlayBtnClicked();
+    void onRecordBtnClicked();
 
 private:
     QPushButton* m_btnImport{nullptr};
@@ -34,8 +47,7 @@ private:
     QPushButton* m_btnVideoFilterGray{nullptr};
     QPushButton* m_btnVideoFilterInvert{nullptr};
     QPushButton* m_btnVideoFilterSticker{nullptr};
+    QPushButton* m_btnStickerAssetSwitch{nullptr};
 };
-
-
 
 #endif //CONTROLLERWIDGET_H

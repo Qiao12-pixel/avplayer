@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "BaseDef.h"
-#include "../../include/IGLContext.h"
+#include "../Engine/IGLContext.h"
 
 namespace av {
     struct IVideoFrame {

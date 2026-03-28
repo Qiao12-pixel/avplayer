@@ -105,21 +105,39 @@ namespace av {
         }
     }
     void AudioDecoder::CheckFlushPacket() {
-        std::lock_guard<std::mutex> lock(m_packetQueueMutex);
-        if (m_packetQueue.empty()) {
+        bool needFlush = false;
+        {
+            std::lock_guard<std::mutex> lock(m_packetQueueMutex);
+            if (m_packetQueue.empty()) {
+                return;
+            }
+            auto packet = m_packetQueue.front();
+            if ((packet->flags & AVFrameFlag::KFlush) != 0) {
+                m_packetQueue.pop_front();
+                needFlush = true;
+            }
+        }
+
+        if (!needFlush) {
             return;
         }
-        auto packet = m_packetQueue.front();
-        if (packet->flags & AVFrameFlag::KFlush) {
-            m_packetQueue.pop_front();
-            avcodec_flush_buffers(m_codecContext);
 
-            auto audioSamples = std::make_shared<IAudioSamples>();
-            audioSamples->flags |= AVFrameFlag::KFlush;//此时为刷新帧
-            std::lock_guard<std::recursive_mutex> lock(m_listenerMutex);
-            if (m_listener) {
-                m_listener->OnNotifyAudioSamples(audioSamples);
+        {
+            std::lock_guard<std::mutex> codecLock(m_codecContextMutex);
+            if (m_codecContext) {
+                avcodec_flush_buffers(m_codecContext);
             }
+            if (m_swrContext) {
+                swr_close(m_swrContext);
+                swr_init(m_swrContext);
+            }
+        }
+
+        auto audioSamples = std::make_shared<IAudioSamples>();
+        audioSamples->flags |= AVFrameFlag::KFlush;//此时为刷新帧
+        std::lock_guard<std::recursive_mutex> lock(m_listenerMutex);
+        if (m_listener) {
+            m_listener->OnNotifyAudioSamples(audioSamples);
         }
     }
     void AudioDecoder::DecodeAVPacket() {
@@ -131,6 +149,10 @@ namespace av {
             }
             packet = m_packetQueue.front();
             m_packetQueue.pop_front();
+        }
+        std::lock_guard<std::mutex> codecLock(m_codecContextMutex);
+        if (!m_codecContext || !m_swrContext) {
+            return;
         }
         if (packet->avPacket && avcodec_send_packet(m_codecContext, packet->avPacket) < 0) {
             std::cerr << "failed to send packet" << std::endl;

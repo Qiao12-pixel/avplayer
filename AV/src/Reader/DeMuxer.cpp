@@ -3,6 +3,7 @@
 //
 
 #include "DeMuxer.h"
+#include <algorithm>
 #include <iostream>
 
 namespace av {
@@ -72,7 +73,7 @@ namespace av {
         m_paused = true;
     }
     void DeMuxer::SeekTo(float position) {
-        m_seekProgress = position;
+        m_seekProgress = std::clamp(position, 0.0f, 1.0f);
         m_seek = true;
         m_notifier.Notify();
     }
@@ -106,19 +107,25 @@ namespace av {
         if (!m_fmtCtx) {
             return;
         }
-        int64_t timeStamp = static_cast<int64_t>(m_seekProgress * m_fmtCtx->duration);
+        const int64_t duration = std::max<int64_t>(0, m_fmtCtx->duration);
+        int64_t timeStamp = static_cast<int64_t>(m_seekProgress * duration);
         if (av_seek_frame(m_fmtCtx, -1, timeStamp, AVSEEK_FLAG_BACKWARD) < 0) {
             std::cerr << "Seek failed " << std::endl;
         }
+        avformat_flush(m_fmtCtx);
         {
             std::lock_guard<std::recursive_mutex> listenerLock(m_listenerMutex);
-            auto audioPacket = std::make_shared<IAVPacket>(nullptr);
-            audioPacket->flags |= AVFrameFlag::KFlush;//停，发刷新包，前面的包不要了【这也是拖动进度条播放逻辑】
-            m_listener->OnNotifyAudioPacket(audioPacket);
+            if (m_listener && m_audioStream.streamIndex >= 0) {
+                auto audioPacket = std::make_shared<IAVPacket>(nullptr);
+                audioPacket->flags |= AVFrameFlag::KFlush;//停，发刷新包，前面的包不要了【这也是拖动进度条播放逻辑】
+                m_listener->OnNotifyAudioPacket(audioPacket);
+            }
 
-            auto videoPacket = std::make_shared<IAVPacket>(nullptr);
-            videoPacket->flags |= AVFrameFlag::KFlush;
-            m_listener->OnNotifyVideoPacket(videoPacket);
+            if (m_listener && m_videoStream.streamIndex >= 0) {
+                auto videoPacket = std::make_shared<IAVPacket>(nullptr);
+                videoPacket->flags |= AVFrameFlag::KFlush;
+                m_listener->OnNotifyVideoPacket(videoPacket);
+            }
         }
         m_seekProgress = -1.0f;
         m_seek = false;
@@ -159,6 +166,10 @@ namespace av {
             av_packet_unref(&packet);
         } else if (ret == AVERROR_EOF) {
             m_paused = true;
+            std::lock_guard<std::recursive_mutex> lock(m_listenerMutex);
+            if (m_listener) {
+                m_listener->OnDeMuxEOF();
+            }
         } else {
             return false;
         }

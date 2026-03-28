@@ -36,8 +36,20 @@ find_package(glm REQUIRED)
 include_directories(${ffmpeg_INCLUDE_DIRS})
 include_directories(${stb_INCLUDE_DIRS})
 
+set(HOMEBREW_OPENCV_FACE_INCLUDE_DIR "/opt/homebrew/Cellar/opencv/4.13.0_6/include/opencv4")
+set(HOMEBREW_OPENCV_FACE_LIBRARY "/opt/homebrew/lib/libopencv_face.dylib")
+set(HOMEBREW_OPENCV_CORE_LIBRARY "/opt/homebrew/lib/libopencv_core.dylib")
+set(HOMEBREW_OPENCV_IMGPROC_LIBRARY "/opt/homebrew/lib/libopencv_imgproc.dylib")
+set(HOMEBREW_OPENCV_OBJDETECT_LIBRARY "/opt/homebrew/lib/libopencv_objdetect.dylib")
+if (EXISTS "${HOMEBREW_OPENCV_FACE_INCLUDE_DIR}/opencv2/face.hpp")
+    include_directories(${HOMEBREW_OPENCV_FACE_INCLUDE_DIR})
+endif ()
+
 # 添加 QT
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Multimedia Quick)
+
+find_package(GLEW REQUIRED)
+find_package(glfw3 REQUIRED)
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
@@ -69,7 +81,7 @@ add_library(${PROJECT_NAME} STATIC ${LIBRARY_SOURCE_FILES}
         AV/src/Reader/MiniDecoder.h
         AV/src/Define/IAudioSamples.h
         AV/src/Define/IVideoFrame.h
-        AV/include/IGLContext.h
+        AV/src/Engine/IGLContext.h
         AV/src/Engine/GLContext.cpp
         AV/src/Reader/Interface/IVideoDecoder.h
         AV/src/Reader/Interface/IAudioDecoder.h
@@ -80,6 +92,51 @@ add_library(${PROJECT_NAME} STATIC ${LIBRARY_SOURCE_FILES}
         AV/src/Reader/Interface/IFileReader.h
         AV/src/Reader/FileReader.cpp
         AV/src/Reader/FileReader.h
+        AV/src/Reader/VideoRender.cpp
+        AV/src/Reader/VideoRender.h
+        AV/src/Engine/AudioRender.cpp
+        AV/src/Engine/AudioRender.h
+        AV/src/Engine/AVSynchronizer.cpp
+        AV/src/Engine/AVSynchronizer.h
+        AV/src/Display/VideoDisplay.cpp
+        AV/src/Display/VideoDisplay.h
+        AV/src/FaceDetect/IFaceLandmarkDetector.h
+        AV/src/FaceDetect/OpenCVLbfFaceLandmarkDetector.cpp
+        AV/src/FaceDetect/OpenCVLbfFaceLandmarkDetector.h
+        AV/src/FaceDetect/StickerPlacementEstimator.cpp
+        AV/src/FaceDetect/StickerPlacementEstimator.h
+        AV/src/VideoFilter/FlipVerticalFilter.cpp
+        AV/src/VideoFilter/FlipVerticalFilter.h
+        AV/src/VideoFilter/GrayFilter.cpp
+        AV/src/VideoFilter/GrayFilter.h
+        AV/src/VideoFilter/InvertFilter.cpp
+        AV/src/VideoFilter/InvertFilter.h
+        AV/src/VideoFilter/StickerFilter.cpp
+        AV/src/VideoFilter/StickerFilter.h
+        AV/src/VideoFilter/VideoFilter.cpp
+        AV/src/VideoFilter/VideoFilter.h
+        AV/include/IVideoFilter.h
+        AV/src/Network/NetworkSession.cpp
+        AV/src/Network/NetworkSession.h
+        AV/src/Writer/IMediaWriter.h
+        AV/src/Writer/IRecorder.h
+        AV/src/Writer/IRecordSession.h
+        AV/src/Writer/IMuxer.h
+        AV/src/Writer/Interface/IAudioEncoder.h
+        AV/src/Writer/Interface/IVideoEncoder.h
+        AV/src/Writer/AudioEncoder.cpp
+        AV/src/Writer/AudioEncoder.h
+        AV/src/Writer/Recorder.cpp
+        AV/src/Writer/Recorder.h
+        AV/src/Writer/RecordSession.cpp
+        AV/src/Writer/RecordSession.h
+        AV/src/Writer/MediaWriter.h
+        AV/src/Writer/Muxer.cpp
+        AV/src/Writer/Muxer.h
+        AV/src/Writer/Mp4Muxer.cpp
+        AV/src/Writer/Mp4Muxer.h
+        AV/src/Writer/VideoEncoder.cpp
+        AV/src/Writer/VideoEncoder.h
 
 )
 # 为静态库添加头文件路径
@@ -94,7 +151,22 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         Qt6::OpenGL
         Qt6::OpenGLWidgets
         Qt6::Multimedia
+        GLEW::GLEW
+        glfw
+        "-framework OpenGL" # macOS 原生 OpenGL 框架
 )
+if (EXISTS "${HOMEBREW_OPENCV_FACE_LIBRARY}")
+    target_link_libraries(${PROJECT_NAME} PRIVATE "${HOMEBREW_OPENCV_FACE_LIBRARY}")
+endif ()
+if (EXISTS "${HOMEBREW_OPENCV_CORE_LIBRARY}")
+    target_link_libraries(${PROJECT_NAME} PRIVATE "${HOMEBREW_OPENCV_CORE_LIBRARY}")
+endif ()
+if (EXISTS "${HOMEBREW_OPENCV_IMGPROC_LIBRARY}")
+    target_link_libraries(${PROJECT_NAME} PRIVATE "${HOMEBREW_OPENCV_IMGPROC_LIBRARY}")
+endif ()
+if (EXISTS "${HOMEBREW_OPENCV_OBJDETECT_LIBRARY}")
+    target_link_libraries(${PROJECT_NAME} PRIVATE "${HOMEBREW_OPENCV_OBJDETECT_LIBRARY}")
+endif ()
 
 # 添加 AVPlayer 源文件
 file(GLOB_RECURSE DEMO_SOURCE_FILES ${PROJECT_ROOT_DIR}/qt/*.cpp)

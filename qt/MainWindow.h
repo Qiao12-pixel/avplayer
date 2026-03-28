@@ -6,8 +6,10 @@
 #define MAINWINDOW_H
 
 #include <QCloseEvent>
+#include <QDateTime>
 #include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFrame>
 #include <QLabel>
 #include <QLineEdit>
@@ -23,6 +25,8 @@
 #include "../AV/src/Engine/AVSynchronizer.h"
 #include "../AV/src/Network/NetworkSession.h"
 #include "../AV/src/Reader/Interface/IFileReader.h"
+#include "../AV/src/Writer/IRecorder.h"
+#include "../AV/src/Writer/IRecordSession.h"
 #include "./UI/ClickableSlider.h"
 #include "./UI/PlayerWidget.h"
 #include "UI/ControllerWidget.h"
@@ -31,7 +35,9 @@ namespace av {
     class FileReader;
 }
 
-class MainWindow : public QMainWindow, public av::IFileReader::Listener {
+class MainWindow : public QMainWindow,
+                   public av::IFileReader::Listener,
+                   public av::IRecordSession::Listener {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget *parent = nullptr);
@@ -41,6 +47,10 @@ public:
     void OnFileReaderNotifyVideoFrame(std::shared_ptr<av::IVideoFrame> videoFrame) override;
     void OnFileReaderNotifyAudioFinished() override;
     void OnFileReaderNotifyVideoFinished() override;
+    void OnRecordSessionStarted(const std::string& tempFilePath) override;
+    void OnRecordSessionSaved(const std::string& outputFilePath) override;
+    void OnRecordSessionAborted() override;
+    void OnRecordSessionError(const std::string& message) override;
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -56,12 +66,14 @@ private slots:
     void onNetworkPlayRequested();
     void onNetworkStopRequested();
     void onPlayToggled(bool playing);
+    void onRecordToggled(bool recording);
     void onTick();
 
 private:
     void createFileReader();
     void releaseFileReader();
     void startPlayback(const QString& filePath);
+    void stopRecording(bool promptForSavePath = false);
     void updateProgress();
     void appendDebugMessage(const QString& message);
     void refreshNetworkPanel();
@@ -86,6 +98,7 @@ private:
     av::NetworkSession m_networkSession;
     av::AVSynchronizer m_synchronizer;
     av::FileReader* m_fileReader{nullptr};
+    std::unique_ptr<av::IRecordSession> m_recordSession;
 };
 
 #endif //MAINWINDOW_H

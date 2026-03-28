@@ -20,10 +20,13 @@ public:
     ~ControllerWidget() override;
 
     void SetPlaying(bool playing);
+    void SetRecording(bool recording);
+    void SetRecordEnabled(bool enabled);
 
 signals:
     void importRequested(const QString& filePath);
     void playToggled(bool playing);
+    void recordToggled(bool recording);
     void stickerAssetSwitchRequested();
     void flipFilterToggled(bool enabled);
     void grayFilterToggled(bool enabled);
@@ -33,6 +36,7 @@ signals:
 private slots:
     void onImportBtnClicked();
     void onPlayBtnClicked();
+    void onRecordBtnClicked();
 
 private:
     QPushButton* m_btnImport{nullptr};

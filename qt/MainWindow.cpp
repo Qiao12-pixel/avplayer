@@ -5,6 +5,7 @@
 #include "MainWindow.h"
 
 #include <algorithm>
+#include <QDir>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFont>
@@ -13,6 +14,10 @@
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     m_synchronizer.Init();
+    m_recordSession.reset(av::IRecordSession::Create());
+    if (m_recordSession) {
+        m_recordSession->SetListener(this);
+    }
 
     auto* centralWidget = new QWidget(this);
     setCentralWidget(centralWidget);
@@ -154,6 +159,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     vbox->addWidget(m_controllerWidget);
     connect(m_controllerWidget, &ControllerWidget::importRequested, this, &MainWindow::onImportRequested);
     connect(m_controllerWidget, &ControllerWidget::playToggled, this, &MainWindow::onPlayToggled);
+    connect(m_controllerWidget, &ControllerWidget::recordToggled, this, &MainWindow::onRecordToggled);
     connect(m_controllerWidget, &ControllerWidget::flipFilterToggled, m_playerWidget, &PlayerWidget::SetFlipEnabled);
     connect(m_controllerWidget, &ControllerWidget::grayFilterToggled, m_playerWidget, &PlayerWidget::SetGrayEnabled);
     connect(m_controllerWidget, &ControllerWidget::invertFilterToggled, m_playerWidget, &PlayerWidget::SetInvertEnabled);
@@ -173,6 +179,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 }
 
 MainWindow::~MainWindow() {
+    stopRecording(false);
     releaseFileReader();
     m_synchronizer.Stop();
 }
@@ -186,6 +193,9 @@ void MainWindow::OnFileReaderNotifyAudioSamples(std::shared_ptr<av::IAudioSample
                   << " ts=" << audioSamples->GetTimeStamp()
                   << " rate=" << audioSamples->sampleRate
                   << " channels=" << audioSamples->channels << std::endl;
+    }
+    if (m_recordSession && m_recordSession->IsRecording()) {
+        m_recordSession->WriteAudioSamples(audioSamples);
     }
     m_synchronizer.PushAudioSamples(audioSamples);
 }
@@ -201,6 +211,9 @@ void MainWindow::OnFileReaderNotifyVideoFrame(std::shared_ptr<av::IVideoFrame> v
                   << " flags=" << videoFrame->flags
                   << " hasData=" << (videoFrame->data ? 1 : 0) << std::endl;
     }
+    if (m_recordSession && m_recordSession->IsRecording()) {
+        m_recordSession->WriteVideoFrame(videoFrame);
+    }
     m_synchronizer.PushVideoFrame(videoFrame);
 }
 
@@ -213,6 +226,7 @@ void MainWindow::OnFileReaderNotifyVideoFinished() {
 }
 
 void MainWindow::closeEvent(QCloseEvent *event) {
+    stopRecording(false);
     releaseFileReader();
     m_synchronizer.Stop();
     QMainWindow::closeEvent(event);
@@ -306,6 +320,43 @@ void MainWindow::onPlayToggled(bool playing) {
     refreshNetworkPanel();
 }
 
+void MainWindow::onRecordToggled(bool recording) {
+    if (!m_controllerWidget) {
+        return;
+    }
+
+    if (!recording) {
+        stopRecording(true);
+        return;
+    }
+
+    if (!m_hasOpenedFile || !m_fileReader || !m_recordSession) {
+        appendDebugMessage("当前没有可录制的播放内容。");
+        m_controllerWidget->SetRecording(false);
+        return;
+    }
+
+    av::RecorderConfig config;
+    config.width = m_fileReader->GetVideoWidth();
+    config.height = m_fileReader->GetVideoHeight();
+    config.audioChannels = 2;
+    config.audioSampleRate = 44100;
+    if (config.width <= 0 || config.height <= 0) {
+        appendDebugMessage("录制启动失败：视频尺寸无效。");
+        m_controllerWidget->SetRecording(false);
+        return;
+    }
+
+    if (!m_recordSession->Start(config)) {
+        appendDebugMessage("录制启动失败：无法创建录制会话。");
+        m_controllerWidget->SetRecording(false);
+        return;
+    }
+
+    m_controllerWidget->SetRecording(true);
+    appendDebugMessage("录制会话已启动，停止时将询问保存位置。");
+}
+
 void MainWindow::onTick() {
     m_synchronizer.Tick();
     updateProgress();
@@ -320,6 +371,7 @@ void MainWindow::createFileReader() {
 }
 
 void MainWindow::releaseFileReader() {
+    stopRecording(false);
     if (!m_fileReader) {
         return;
     }
@@ -335,6 +387,8 @@ void MainWindow::releaseFileReader() {
     refreshNetworkPanel();
     if (m_controllerWidget) {
         m_controllerWidget->SetPlaying(false);
+        m_controllerWidget->SetRecording(false);
+        m_controllerWidget->SetRecordEnabled(false);
     }
 }
 
@@ -370,7 +424,51 @@ void MainWindow::startPlayback(const QString& filePath) {
     m_isPlaying = true;
     if (m_controllerWidget) {
         m_controllerWidget->SetPlaying(true);
+        m_controllerWidget->SetRecordEnabled(true);
     }
+}
+
+void MainWindow::stopRecording(bool promptForSavePath) {
+    if (m_controllerWidget) {
+        m_controllerWidget->SetRecording(false);
+    }
+    if (!m_recordSession || !m_recordSession->IsRecording()) {
+        return;
+    }
+
+    if (!promptForSavePath) {
+        m_recordSession->Abort();
+        return;
+    }
+
+    const QString defaultPath = QString::fromStdString(
+        m_recordSession->BuildDefaultOutputPath(QDir::currentPath().toStdString()));
+    const QString outputPath = QFileDialog::getSaveFileName(
+        this, "保存录制文件", defaultPath, "MP4 文件 (*.mp4)");
+    if (outputPath.isEmpty()) {
+        m_recordSession->Abort();
+        return;
+    }
+
+    if (!m_recordSession->StopAndSave(outputPath.toStdString())) {
+        appendDebugMessage("录制保存失败。");
+    }
+}
+
+void MainWindow::OnRecordSessionStarted(const std::string& tempFilePath) {
+    appendDebugMessage(QString("录制已开始，临时文件：%1").arg(QString::fromStdString(tempFilePath)));
+}
+
+void MainWindow::OnRecordSessionSaved(const std::string& outputFilePath) {
+    appendDebugMessage(QString("录制已保存：%1").arg(QString::fromStdString(outputFilePath)));
+}
+
+void MainWindow::OnRecordSessionAborted() {
+    appendDebugMessage("录制已中止，临时文件已清理。");
+}
+
+void MainWindow::OnRecordSessionError(const std::string& message) {
+    appendDebugMessage(QString::fromStdString(message));
 }
 
 void MainWindow::updateProgress() {

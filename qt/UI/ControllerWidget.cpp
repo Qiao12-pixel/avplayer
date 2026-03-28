@@ -15,6 +15,7 @@ ControllerWidget::ControllerWidget(QWidget *parent) : QWidget(parent){
 
     m_btnExport = new QPushButton("录制", this);
     m_btnExport->setEnabled(false);
+    connect(m_btnExport, &QPushButton::clicked, this, &ControllerWidget::onRecordBtnClicked);
 
     m_btnVideoFilterFlipVertical = new QPushButton("垂直翻转", this);
     m_btnVideoFilterGray = new QPushButton("黑白滤镜", this);
@@ -52,6 +53,14 @@ void ControllerWidget::SetPlaying(bool playing) {
     m_btnPlay->setText(playing ? "暂停" : "播放");
 }
 
+void ControllerWidget::SetRecording(bool recording) {
+    m_btnExport->setText(recording ? "停止录制" : "录制");
+}
+
+void ControllerWidget::SetRecordEnabled(bool enabled) {
+    m_btnExport->setEnabled(enabled);
+}
+
 void ControllerWidget::onImportBtnClicked() {
     const QString videoFilePath = QFileDialog::getOpenFileName(
         this, "打开视频文件", QDir::currentPath(), "视频文件(*.mp4;*.avi;*.mov;*.mkv);;所有文件(*)");
@@ -65,4 +74,9 @@ void ControllerWidget::onPlayBtnClicked() {
     const bool nextStateIsPlaying = m_btnPlay->text() == "播放";
     SetPlaying(nextStateIsPlaying);
     emit playToggled(nextStateIsPlaying);
+}
+
+void ControllerWidget::onRecordBtnClicked() {
+    const bool nextStateIsRecording = m_btnExport->text() == "录制";
+    emit recordToggled(nextStateIsRecording);
 }

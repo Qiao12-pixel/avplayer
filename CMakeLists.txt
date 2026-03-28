@@ -118,6 +118,25 @@ add_library(${PROJECT_NAME} STATIC ${LIBRARY_SOURCE_FILES}
         AV/include/IVideoFilter.h
         AV/src/Network/NetworkSession.cpp
         AV/src/Network/NetworkSession.h
+        AV/src/Writer/IMediaWriter.h
+        AV/src/Writer/IRecorder.h
+        AV/src/Writer/IRecordSession.h
+        AV/src/Writer/IMuxer.h
+        AV/src/Writer/Interface/IAudioEncoder.h
+        AV/src/Writer/Interface/IVideoEncoder.h
+        AV/src/Writer/AudioEncoder.cpp
+        AV/src/Writer/AudioEncoder.h
+        AV/src/Writer/Recorder.cpp
+        AV/src/Writer/Recorder.h
+        AV/src/Writer/RecordSession.cpp
+        AV/src/Writer/RecordSession.h
+        AV/src/Writer/MediaWriter.h
+        AV/src/Writer/Muxer.cpp
+        AV/src/Writer/Muxer.h
+        AV/src/Writer/Mp4Muxer.cpp
+        AV/src/Writer/Mp4Muxer.h
+        AV/src/Writer/VideoEncoder.cpp
+        AV/src/Writer/VideoEncoder.h
 
 )
 # 为静态库添加头文件路径

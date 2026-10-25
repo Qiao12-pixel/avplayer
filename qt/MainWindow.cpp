@@ -9,10 +9,11 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFont>
+#include <QStackedWidget>
 
 #include "../AV/src/Reader/FileReader.h"
 
-MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
+MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_aiAssistantService(*this) {
     m_synchronizer.Init();
     m_recordSession.reset(av::IRecordSession::Create());
     if (m_recordSession) {
@@ -86,6 +87,44 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     sideLayout->setContentsMargins(16, 16, 16, 16);
     sideLayout->setSpacing(10);
 
+    auto* panelTabs = new QHBoxLayout();
+    auto* networkTab = new QPushButton("网络", m_sidePanel);
+    auto* aiTab = new QPushButton("AI 助手", m_sidePanel);
+    networkTab->setStyleSheet("QPushButton { padding: 7px 10px; border-radius: 9px; color: #aab8cc; background: rgba(15, 23, 42, 0.55); border: 1px solid transparent; } QPushButton:checked { color: white; background: #315efb; }");
+    aiTab->setStyleSheet(networkTab->styleSheet());
+    networkTab->setCheckable(true);
+    aiTab->setCheckable(true);
+    networkTab->setChecked(true);
+    panelTabs->addWidget(networkTab);
+    panelTabs->addWidget(aiTab);
+    sideLayout->addLayout(panelTabs);
+
+    auto* panelStack = new QStackedWidget(m_sidePanel);
+    auto* networkPage = new QWidget(panelStack);
+    auto* networkLayout = new QVBoxLayout(networkPage);
+    networkLayout->setContentsMargins(0, 0, 0, 0);
+    networkLayout->setSpacing(10);
+    m_aiAssistantPanel = new AIAssistantPanel(panelStack);
+    panelStack->addWidget(networkPage);
+    panelStack->addWidget(m_aiAssistantPanel);
+    sideLayout->addWidget(panelStack, 1);
+    connect(networkTab, &QPushButton::clicked, this, [panelStack, networkTab, aiTab] {
+        panelStack->setCurrentIndex(0);
+        networkTab->setChecked(true);
+        aiTab->setChecked(false);
+    });
+    connect(aiTab, &QPushButton::clicked, this, [panelStack, networkTab, aiTab] {
+        panelStack->setCurrentIndex(1);
+        networkTab->setChecked(false);
+        aiTab->setChecked(true);
+    });
+    connect(m_aiAssistantPanel, &AIAssistantPanel::playPauseRequested, this, [this] {
+        m_aiAssistantService.TogglePlayback();
+    });
+    connect(m_aiAssistantPanel, &AIAssistantPanel::seekToStartRequested, this, [this] {
+        m_aiAssistantService.SeekToStart();
+    });
+
     auto* panelTitle = new QLabel("网络控制台", m_sidePanel);
     QFont panelTitleFont;
     panelTitleFont.setPointSize(18);
@@ -133,22 +172,22 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     m_debugLabel->setMinimumHeight(220);
     m_debugLabel->setStyleSheet("background: rgba(6, 12, 22, 0.88); color: #d7f7d7; border: 1px solid rgba(148, 163, 184, 0.20); border-radius: 12px; padding: 10px;");
 
-    sideLayout->addWidget(panelTitle);
-    sideLayout->addSpacing(4);
-    sideLayout->addWidget(sourceTitle);
-    sideLayout->addWidget(m_currentSourceValueLabel);
-    sideLayout->addSpacing(4);
-    sideLayout->addWidget(networkStateTitle);
-    sideLayout->addWidget(m_networkStatusValueLabel);
-    sideLayout->addSpacing(4);
-    sideLayout->addWidget(errorTitle);
-    sideLayout->addWidget(m_errorValueLabel);
-    sideLayout->addSpacing(6);
-    sideLayout->addWidget(networkTitle);
-    sideLayout->addWidget(m_networkUrlEdit);
-    sideLayout->addLayout(buttonRow);
-    sideLayout->addWidget(debugTitle);
-    sideLayout->addWidget(m_debugLabel, 1);
+    networkLayout->addWidget(panelTitle);
+    networkLayout->addSpacing(4);
+    networkLayout->addWidget(sourceTitle);
+    networkLayout->addWidget(m_currentSourceValueLabel);
+    networkLayout->addSpacing(4);
+    networkLayout->addWidget(networkStateTitle);
+    networkLayout->addWidget(m_networkStatusValueLabel);
+    networkLayout->addSpacing(4);
+    networkLayout->addWidget(errorTitle);
+    networkLayout->addWidget(m_errorValueLabel);
+    networkLayout->addSpacing(6);
+    networkLayout->addWidget(networkTitle);
+    networkLayout->addWidget(m_networkUrlEdit);
+    networkLayout->addLayout(buttonRow);
+    networkLayout->addWidget(debugTitle);
+    networkLayout->addWidget(m_debugLabel, 1);
 
     topLayout->addWidget(m_sidePanel, 2);
     vbox->addLayout(topLayout, 9);
@@ -178,6 +217,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     m_renderTimer.start();
 
     refreshNetworkPanel();
+    syncAiContext();
     appendDebugMessage("Qt 网络框架已初始化，等待输入地址或导入本地文件。");
 }
 
@@ -302,6 +342,7 @@ void MainWindow::onNetworkStopRequested() {
     appendDebugMessage("停止网络源/播放");
     releaseFileReader();
     m_synchronizer.Stop();
+    syncAiContext();
 }
 
 void MainWindow::onPlayToggled(bool playing) {
@@ -319,6 +360,8 @@ void MainWindow::onPlayToggled(bool playing) {
             m_fileReader->Start();
             m_isPlaying = true;
         }
+        if (m_controllerWidget) m_controllerWidget->SetPlaying(m_isPlaying);
+        syncAiContext();
         return;
     }
 
@@ -326,6 +369,8 @@ void MainWindow::onPlayToggled(bool playing) {
         m_fileReader->Paused();
     }
     m_isPlaying = false;
+    if (m_controllerWidget) m_controllerWidget->SetPlaying(false);
+    syncAiContext();
     m_networkSession.Stop();
     refreshNetworkPanel();
 }
@@ -337,6 +382,7 @@ void MainWindow::onRecordToggled(bool recording) {
 
     if (!recording) {
         stopRecording(true);
+        syncAiContext();
         return;
     }
 
@@ -364,6 +410,7 @@ void MainWindow::onRecordToggled(bool recording) {
     }
 
     m_controllerWidget->SetRecording(true);
+    syncAiContext();
     appendDebugMessage("录制会话已启动，停止时将询问保存位置。");
 }
 
@@ -401,10 +448,25 @@ void MainWindow::createFileReader() {
     m_fileReader->SetListener(this);
 }
 
+void MainWindow::TogglePlayback() {
+    onPlayToggled(!m_isPlaying);
+}
+
+bool MainWindow::SeekToStart() {
+    if (!m_fileReader || !m_hasOpenedFile) {
+        appendDebugMessage("AI 助手：当前没有可跳转的视频。");
+        return false;
+    }
+    m_fileReader->SeekTo(0.0f);
+    appendDebugMessage("AI 助手：已请求跳转到视频开头。");
+    return true;
+}
+
 void MainWindow::releaseFileReader() {
     ++m_playbackGeneration;
     stopRecording(false);
     if (!m_fileReader) {
+        syncAiContext();
         return;
     }
     m_fileReader->Stop();
@@ -413,6 +475,7 @@ void MainWindow::releaseFileReader() {
     m_hasOpenedFile = false;
     m_isPlaying = false;
     m_durationSeconds = 0.0f;
+    syncAiContext();
     if (m_progressSlider) {
         m_progressSlider->setValue(0);
     }
@@ -429,6 +492,7 @@ void MainWindow::startPlayback(const QString& filePath) {
         return;
     }
 
+    m_currentFilePath = filePath;
     releaseFileReader();
     m_synchronizer.Stop();
     createFileReader();
@@ -458,6 +522,7 @@ void MainWindow::startPlayback(const QString& filePath) {
         m_controllerWidget->SetPlaying(true);
         m_controllerWidget->SetRecordEnabled(true);
     }
+    syncAiContext();
 }
 
 void MainWindow::stopRecording(bool promptForSavePath) {
@@ -465,11 +530,13 @@ void MainWindow::stopRecording(bool promptForSavePath) {
         m_controllerWidget->SetRecording(false);
     }
     if (!m_recordSession || !m_recordSession->IsRecording()) {
+        syncAiContext();
         return;
     }
 
     if (!promptForSavePath) {
         m_recordSession->Abort();
+        syncAiContext();
         return;
     }
 
@@ -479,11 +546,29 @@ void MainWindow::stopRecording(bool promptForSavePath) {
         this, "保存录制文件", defaultPath, "MP4 文件 (*.mp4)");
     if (outputPath.isEmpty()) {
         m_recordSession->Abort();
+        syncAiContext();
         return;
     }
 
     if (!m_recordSession->StopAndSave(outputPath.toStdString())) {
         appendDebugMessage("录制保存失败。");
+    }
+    syncAiContext();
+}
+/*
+ * 同步主界面相关信息给ui界面，这样可以用于ai的回复
+ */
+void MainWindow::syncAiContext() {
+    const bool loaded = m_hasOpenedFile && m_fileReader;
+    const bool recording = m_recordSession && m_recordSession->IsRecording();
+    const int width = loaded ? m_fileReader->GetVideoWidth() : 0;
+    const int height = loaded ? m_fileReader->GetVideoHeight() : 0;
+    m_aiAssistantService.UpdateMediaContext({loaded ? m_currentFilePath.toStdString() : std::string{},
+        loaded, loaded && m_isPlaying, recording, width, height});
+    if (m_aiAssistantPanel) {
+        m_aiAssistantPanel->SetMediaContext(loaded ? m_currentFilePath : QString{}, loaded && m_isPlaying,
+            width, height);
+        m_aiAssistantPanel->SetRecording(recording);
     }
 }
 

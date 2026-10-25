@@ -107,6 +107,9 @@ set(INCLUDE_DIRS
 file(GLOB_RECURSE LIBRARY_SOURCE_FILES ${PROJECT_ROOT_DIR}/LearnAV/*.cpp)
 # 创建静态库
 add_library(${PROJECT_NAME} STATIC ${LIBRARY_SOURCE_FILES}
+        AV/src/AI/AIAssistantService.cpp
+        AV/src/AI/AIAssistantService.h
+        AV/src/AI/IPlayerControl.h
         AV/src/Core/TaskPool.cpp
         AV/src/Core/TaskPool.h
         AV/src/Reader/Interface/IDeMuxer.h
@@ -197,8 +200,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 # 添加 AVPlayer 源文件
 file(GLOB_RECURSE DEMO_SOURCE_FILES ${PROJECT_ROOT_DIR}/qt/*.cpp)
 # 创建 AVPlayer
-add_executable(AVPlayer ${DEMO_SOURCE_FILES}
-        )
+add_executable(AVPlayer ${DEMO_SOURCE_FILES})
 # 为 AVPlayer 添加头文件路径
 target_include_directories(AVPlayer PRIVATE ${PROJECT_ROOT_DIR}/qt ${PROJECT_ROOT_DIR}/LearnAV/qt)
 # 为 AVPlayer 添加链接库

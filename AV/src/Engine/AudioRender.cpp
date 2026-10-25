@@ -140,6 +140,7 @@ namespace av {
     void AudioRender::Stop() {
         if (m_audioSink) {
             m_audioSink->stop();
+            m_audioSink.reset();
         }
         m_outputDevice = nullptr;
         m_started = false;

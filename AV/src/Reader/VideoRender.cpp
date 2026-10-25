@@ -5,6 +5,7 @@
 #include "VideoRender.h"
 
 #include <iostream>
+#include <opencv2/imgproc.hpp>
 
 namespace av {
     const char* vertexShaderSource = R"(
@@ -156,18 +157,29 @@ namespace av {
 
 
         if (frameToRender && frameToRender->data) {
+            // Legacy GLFW renderer uses one RGBA texture. Convert its YUV420P
+            // input locally; the active Qt renderer performs this on the GPU.
+            if ((frameToRender->width & 1) || (frameToRender->height & 1)) {
+                std::cerr << "[VideoRender] odd YUV420P dimensions are unsupported" << std::endl;
+                return;
+            }
+            const int width = static_cast<int>(frameToRender->width);
+            const int height = static_cast<int>(frameToRender->height);
+            cv::Mat yuv(height * 3 / 2, width, CV_8UC1, frameToRender->data.get());
+            cv::Mat rgba;
+            cv::cvtColor(yuv, rgba, cv::COLOR_YUV2RGBA_I420);
             glBindTexture(GL_TEXTURE_2D, m_texture);
             // 🌟 内存对齐护盾：告诉 OpenGL 紧凑读取内存，防止花屏
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
             glPixelStorei(GL_UNPACK_ROW_LENGTH, frameToRender->width);
             if (m_texWidth != frameToRender->width || m_texHeight != frameToRender->height) {
                 //分辨率改变时，重新分配显存
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, frameToRender->width, frameToRender->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frameToRender->data.get());
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, frameToRender->width, frameToRender->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data);
                 m_texWidth = frameToRender->width;
                 m_texHeight = frameToRender->height;
             } else {
                 //补充每次都分配，减少内存分配
-                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_texWidth, m_texHeight, GL_RGBA, GL_UNSIGNED_BYTE, frameToRender->data.get());
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_texWidth, m_texHeight, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data);
             }
         }
         //开始画图

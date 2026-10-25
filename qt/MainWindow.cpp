@@ -75,6 +75,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     m_playerWidget->setStyleSheet("background: #000; border-radius: 18px;");
     topLayout->addWidget(m_playerWidget, 5);
     m_synchronizer.SetVideoOutput(m_playerWidget);
+    m_playerWidget->SetMetricsSources(
+        [this] { return m_synchronizer.GetAudioClock(); },
+        [this] { return m_recordSession && m_recordSession->IsRecording(); });
 
     m_sidePanel = new QWidget(this);
     m_sidePanel->setMinimumWidth(360);
@@ -181,7 +184,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 MainWindow::~MainWindow() {
     stopRecording(false);
     releaseFileReader();
-    m_synchronizer.Stop();
+    m_synchronizer.Shutdown();
 }
 
 void MainWindow::OnFileReaderNotifyAudioSamples(std::shared_ptr<av::IAudioSamples> audioSamples) {
@@ -197,7 +200,13 @@ void MainWindow::OnFileReaderNotifyAudioSamples(std::shared_ptr<av::IAudioSample
     if (m_recordSession && m_recordSession->IsRecording()) {
         m_recordSession->WriteAudioSamples(audioSamples);
     }
-    m_synchronizer.PushAudioSamples(audioSamples);
+    // QAudioSink belongs to the UI thread. Decoder callbacks run on a worker thread.
+    const uint64_t generation = m_playbackGeneration.load();
+    QMetaObject::invokeMethod(this, [this, audioSamples, generation] {
+        if (generation == m_playbackGeneration.load()) {
+            m_synchronizer.PushAudioSamples(audioSamples);
+        }
+    }, Qt::QueuedConnection);
 }
 
 void MainWindow::OnFileReaderNotifyVideoFrame(std::shared_ptr<av::IVideoFrame> videoFrame) {
@@ -226,9 +235,10 @@ void MainWindow::OnFileReaderNotifyVideoFinished() {
 }
 
 void MainWindow::closeEvent(QCloseEvent *event) {
+    m_renderTimer.stop();
     stopRecording(false);
     releaseFileReader();
-    m_synchronizer.Stop();
+    m_synchronizer.Shutdown();
     QMainWindow::closeEvent(event);
 }
 
@@ -362,6 +372,27 @@ void MainWindow::onTick() {
     updateProgress();
 }
 
+void MainWindow::StartBenchmark(const QString& filePath, int seconds, bool sticker,
+                                bool record, const QString& outputPath, const QString& capturePath) {
+    m_playerWidget->SetStickerEnabled(sticker);
+    startPlayback(filePath);
+    if (record && m_hasOpenedFile) onRecordToggled(true);
+    if (!capturePath.isEmpty()) {
+        QTimer::singleShot(2000, this, [this, capturePath] {
+            const bool saved = m_playerWidget->grabFramebuffer().save(capturePath);
+            std::cout << "[PlaybackMetrics] captured_frame=" << capturePath.toStdString()
+                      << " saved=" << (saved ? 1 : 0) << std::endl;
+        });
+    }
+    QTimer::singleShot(std::max(1, seconds) * 1000, this, [this, record, outputPath] {
+        m_playerWidget->FlushMetrics();
+        if (record && m_recordSession && m_recordSession->IsRecording()) {
+            m_recordSession->StopAndSave(outputPath.toStdString());
+        }
+        close();
+    });
+}
+
 void MainWindow::createFileReader() {
     if (m_fileReader) {
         return;
@@ -371,6 +402,7 @@ void MainWindow::createFileReader() {
 }
 
 void MainWindow::releaseFileReader() {
+    ++m_playbackGeneration;
     stopRecording(false);
     if (!m_fileReader) {
         return;

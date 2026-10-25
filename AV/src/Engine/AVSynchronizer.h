@@ -29,8 +29,10 @@ namespace av {
 
         void Tick();
         void Stop();
+        void Shutdown();
 
         double GetMasterClock() const;
+        double GetAudioClock() const;
 
     private:
         std::shared_ptr<IVideoFrame> TakeReadyVideoFrame(double masterClock, bool useAudioClock);

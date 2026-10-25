@@ -30,19 +30,58 @@ add_definitions(-DCACHE_DIR="${CACHE_DIR}")
 
 # 通过 Conan 添加依赖
 find_package(ffmpeg REQUIRED)
+
+# The Conan OpenCV package used by the original profile may omit opencv_contrib's
+# face module. Prefer a local OpenCV installation that provides LBF support.
+if (EXISTS "/opt/homebrew/lib/cmake/opencv5/OpenCVConfig.cmake")
+    set(OpenCV_DIR "/opt/homebrew/lib/cmake/opencv5" CACHE PATH
+        "OpenCV package configuration directory" FORCE)
+endif ()
 find_package(OpenCV REQUIRED)
+set(AVPLAYER_HAS_OPENCV_FACE FALSE)
+foreach (OPENCV_INCLUDE_DIR IN LISTS OpenCV_INCLUDE_DIRS)
+    if (EXISTS "${OPENCV_INCLUDE_DIR}/opencv2/face.hpp")
+        set(AVPLAYER_HAS_OPENCV_FACE TRUE)
+    endif ()
+endforeach ()
+if (NOT AVPLAYER_HAS_OPENCV_FACE)
+    message(FATAL_ERROR "OpenCV with the face module is required; set OpenCV_DIR to a matching OpenCV installation")
+endif ()
+if (TARGET opencv::opencv)
+    set(AVPLAYER_OPENCV_LIBS opencv::opencv)
+else ()
+    set(AVPLAYER_OPENCV_LIBS ${OpenCV_LIBS})
+endif ()
 find_package(stb REQUIRED)
 find_package(glm REQUIRED)
 include_directories(${ffmpeg_INCLUDE_DIRS})
+include_directories(${OpenCV_INCLUDE_DIRS})
 include_directories(${stb_INCLUDE_DIRS})
 
-set(HOMEBREW_OPENCV_FACE_INCLUDE_DIR "/opt/homebrew/Cellar/opencv/4.13.0_6/include/opencv4")
-set(HOMEBREW_OPENCV_FACE_LIBRARY "/opt/homebrew/lib/libopencv_face.dylib")
-set(HOMEBREW_OPENCV_CORE_LIBRARY "/opt/homebrew/lib/libopencv_core.dylib")
-set(HOMEBREW_OPENCV_IMGPROC_LIBRARY "/opt/homebrew/lib/libopencv_imgproc.dylib")
-set(HOMEBREW_OPENCV_OBJDETECT_LIBRARY "/opt/homebrew/lib/libopencv_objdetect.dylib")
-if (EXISTS "${HOMEBREW_OPENCV_FACE_INCLUDE_DIR}/opencv2/face.hpp")
-    include_directories(${HOMEBREW_OPENCV_FACE_INCLUDE_DIR})
+# Keep all Qt modules on the same minor version. Homebrew can leave qtbase at
+# 6.11 while qtmultimedia is still 6.10, which produces a link-time ABI crash.
+if (EXISTS "/opt/homebrew/Cellar/qtbase/6.10.2/lib/cmake/Qt6/Qt6Config.cmake"
+    AND EXISTS "/opt/homebrew/Cellar/qtmultimedia/6.10.2/lib/cmake/Qt6Multimedia/Qt6MultimediaConfig.cmake"
+    AND EXISTS "/opt/homebrew/Cellar/qtdeclarative/6.10.2/lib/cmake/Qt6Quick/Qt6QuickConfig.cmake")
+    set(Qt6_DIR "/opt/homebrew/Cellar/qtbase/6.10.2/lib/cmake/Qt6" CACHE PATH
+        "Qt6 package configuration directory" FORCE)
+    foreach (QT_COMPONENT Core Gui Widgets OpenGL OpenGLWidgets CoreTools GuiTools WidgetsTools Multimedia Quick Qml)
+        if (QT_COMPONENT STREQUAL "Multimedia")
+            set(QT_COMPONENT_ROOT "/opt/homebrew/Cellar/qtmultimedia/6.10.2/lib/cmake/Qt6Multimedia")
+        elseif (QT_COMPONENT STREQUAL "Quick" OR QT_COMPONENT STREQUAL "Qml")
+            set(QT_COMPONENT_ROOT "/opt/homebrew/Cellar/qtdeclarative/6.10.2/lib/cmake/Qt6${QT_COMPONENT}")
+        else ()
+            set(QT_COMPONENT_ROOT "/opt/homebrew/Cellar/qtbase/6.10.2/lib/cmake/Qt6${QT_COMPONENT}")
+        endif ()
+        if (EXISTS "${QT_COMPONENT_ROOT}")
+            set(Qt6${QT_COMPONENT}_DIR "${QT_COMPONENT_ROOT}" CACHE PATH
+                "Qt6 ${QT_COMPONENT} package configuration directory" FORCE)
+        endif ()
+    endforeach ()
+    list(PREPEND CMAKE_PREFIX_PATH
+        "/opt/homebrew/Cellar/qtbase/6.10.2"
+        "/opt/homebrew/Cellar/qtmultimedia/6.10.2"
+        "/opt/homebrew/Cellar/qtdeclarative/6.10.2")
 endif ()
 
 # 添加 QT
@@ -144,7 +183,7 @@ add_library(${PROJECT_NAME} STATIC ${LIBRARY_SOURCE_FILES}
 # 为静态库添加链接库
 target_link_libraries(${PROJECT_NAME} PRIVATE
         ffmpeg::ffmpeg
-        opencv::opencv
+        ${AVPLAYER_OPENCV_LIBS}
         stb::stb
         glm::glm
         Qt6::Widgets       # <--- 必须添加这一行
@@ -155,19 +194,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         glfw
         "-framework OpenGL" # macOS 原生 OpenGL 框架
 )
-if (EXISTS "${HOMEBREW_OPENCV_FACE_LIBRARY}")
-    target_link_libraries(${PROJECT_NAME} PRIVATE "${HOMEBREW_OPENCV_FACE_LIBRARY}")
-endif ()
-if (EXISTS "${HOMEBREW_OPENCV_CORE_LIBRARY}")
-    target_link_libraries(${PROJECT_NAME} PRIVATE "${HOMEBREW_OPENCV_CORE_LIBRARY}")
-endif ()
-if (EXISTS "${HOMEBREW_OPENCV_IMGPROC_LIBRARY}")
-    target_link_libraries(${PROJECT_NAME} PRIVATE "${HOMEBREW_OPENCV_IMGPROC_LIBRARY}")
-endif ()
-if (EXISTS "${HOMEBREW_OPENCV_OBJDETECT_LIBRARY}")
-    target_link_libraries(${PROJECT_NAME} PRIVATE "${HOMEBREW_OPENCV_OBJDETECT_LIBRARY}")
-endif ()
-
 # 添加 AVPlayer 源文件
 file(GLOB_RECURSE DEMO_SOURCE_FILES ${PROJECT_ROOT_DIR}/qt/*.cpp)
 # 创建 AVPlayer
@@ -177,3 +203,38 @@ add_executable(AVPlayer ${DEMO_SOURCE_FILES}
 target_include_directories(AVPlayer PRIVATE ${PROJECT_ROOT_DIR}/qt ${PROJECT_ROOT_DIR}/LearnAV/qt)
 # 为 AVPlayer 添加链接库
 target_link_libraries(AVPlayer Qt6::Core Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Quick ${PROJECT_NAME})
+
+if (APPLE AND EXISTS "/opt/homebrew/Cellar/qtbase/6.10.2/lib")
+    # Homebrew's `opt` symlink may point qtbase at a newer minor release than
+    # qtmultimedia. Rewrite the executable's framework IDs so CLion can launch
+    # it without requiring DYLD_FRAMEWORK_PATH in the run configuration.
+    set(AVPLAYER_QTBASE_LIB "/opt/homebrew/Cellar/qtbase/6.10.2/lib")
+    set(AVPLAYER_QTMM_LIB "/opt/homebrew/Cellar/qtmultimedia/6.10.2/lib")
+    set(AVPLAYER_QTDECL_LIB "/opt/homebrew/Cellar/qtdeclarative/6.10.2/lib")
+    add_custom_command(TARGET AVPlayer POST_BUILD
+        COMMAND install_name_tool -change
+        "/opt/homebrew/opt/qtbase/lib/QtCore.framework/Versions/A/QtCore"
+        "${AVPLAYER_QTBASE_LIB}/QtCore.framework/Versions/A/QtCore" $<TARGET_FILE:AVPlayer>
+        COMMAND install_name_tool -change
+        "/opt/homebrew/opt/qtbase/lib/QtGui.framework/Versions/A/QtGui"
+        "${AVPLAYER_QTBASE_LIB}/QtGui.framework/Versions/A/QtGui" $<TARGET_FILE:AVPlayer>
+        COMMAND install_name_tool -change
+        "/opt/homebrew/opt/qtbase/lib/QtWidgets.framework/Versions/A/QtWidgets"
+        "${AVPLAYER_QTBASE_LIB}/QtWidgets.framework/Versions/A/QtWidgets" $<TARGET_FILE:AVPlayer>
+        COMMAND install_name_tool -change
+        "/opt/homebrew/opt/qtbase/lib/QtOpenGL.framework/Versions/A/QtOpenGL"
+        "${AVPLAYER_QTBASE_LIB}/QtOpenGL.framework/Versions/A/QtOpenGL" $<TARGET_FILE:AVPlayer>
+        COMMAND install_name_tool -change
+        "/opt/homebrew/opt/qtbase/lib/QtOpenGLWidgets.framework/Versions/A/QtOpenGLWidgets"
+        "${AVPLAYER_QTBASE_LIB}/QtOpenGLWidgets.framework/Versions/A/QtOpenGLWidgets" $<TARGET_FILE:AVPlayer>
+        COMMAND install_name_tool -change
+        "/opt/homebrew/opt/qtmultimedia/lib/QtMultimedia.framework/Versions/A/QtMultimedia"
+        "${AVPLAYER_QTMM_LIB}/QtMultimedia.framework/Versions/A/QtMultimedia" $<TARGET_FILE:AVPlayer>
+        COMMAND install_name_tool -change
+        "/opt/homebrew/opt/qtdeclarative/lib/QtQuick.framework/Versions/A/QtQuick"
+        "${AVPLAYER_QTDECL_LIB}/QtQuick.framework/Versions/A/QtQuick" $<TARGET_FILE:AVPlayer>
+        COMMAND install_name_tool -change
+        "/opt/homebrew/opt/qtdeclarative/lib/QtQml.framework/Versions/A/QtQml"
+        "${AVPLAYER_QTDECL_LIB}/QtQml.framework/Versions/A/QtQml" $<TARGET_FILE:AVPlayer>
+    )
+endif ()

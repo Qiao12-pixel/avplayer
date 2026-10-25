@@ -8,6 +8,8 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
+#include <tuple>
 #include <unordered_map>
 
 #include <QOpenGLFunctions_3_3_Core>
@@ -26,12 +28,16 @@ namespace av {
         void Initialize(QOpenGLFunctions_3_3_Core* gl);
         void Cleanup(QOpenGLFunctions_3_3_Core* gl);
         void Resize(QOpenGLFunctions_3_3_Core* gl, int width, int height);
-        void Render(QOpenGLFunctions_3_3_Core* gl);
+        std::shared_ptr<IVideoFrame> Render(QOpenGLFunctions_3_3_Core* gl);
 
         void PushFrame(const std::shared_ptr<IVideoFrame>& frame);
         void ClearFrame();
         void SetFilterEnabled(VideoFilterType type, bool enabled);
         void CycleStickerResource();
+        int FrameWidth() const { return m_frameWidth; }
+        int FrameHeight() const { return m_frameHeight; }
+        bool StickerEnabled() const { return IsFilterEnabled(VideoFilterType::kSticker); }
+        std::tuple<int, int, int> TakeFaceDetectionCounts();
 
     private:
         StickerAnchorMode GetStickerAnchorMode() const;
@@ -50,15 +56,20 @@ namespace av {
         GLuint m_vao{0};
         GLuint m_vbo{0};
         GLuint m_ebo{0};
-        GLuint m_frameTexture{0};
+        GLuint m_frameTextures[3]{};
         GLuint m_stickerTexture{0};
         int m_frameWidth{0};
         int m_frameHeight{0};
+        bool m_fullRange{false};
+        bool m_bt709{false};
         bool m_initialized{false};
         bool m_stickerLoaded{false};
         bool m_hasUploadedFrame{false};
         int m_faceDetectFrameInterval{6};
         int m_faceDetectFrameCounter{0};
+        int m_faceDetectionAttempts{0};
+        int m_faceDetectionHits{0};
+        int m_landmarkHits{0};
         int m_faceMissingFrameCount{0};
         int m_stickerHoldFrameCount{0};
         StickerPlacement m_smoothedPlacement;

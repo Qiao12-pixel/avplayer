@@ -60,6 +60,9 @@ namespace av {
             return;
         }
         m_timeBase = stream->time_base;
+        std::cout << "[PlaybackMetrics] input_codec=" << avcodec_get_name(stream->codecpar->codec_id)
+                  << " resolution=" << stream->codecpar->width << "x" << stream->codecpar->height
+                  << " source_fps=" << av_q2d(stream->avg_frame_rate) << std::endl;
     }
     void VideoDecoder::Decode(std::shared_ptr<IAVPacket> packet) {
         if (!packet) {
@@ -192,41 +195,45 @@ namespace av {
                 av_frame_free(&frame);
                 return;
             }
-            if (!m_swsContext) {
-                m_swsContext = sws_getContext(frame->width, frame->height, (AVPixelFormat)frame->format, frame->width, frame->height, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
-                if (!m_swsContext) {
-                    std::cerr << "failed init SWS context" << std::endl;
+            const int numBytes = av_image_get_buffer_size(AV_PIX_FMT_YUV420P, frame->width, frame->height, 1);
+            if (numBytes <= 0) {
+                av_frame_free(&frame);
+                return;
+            }
+            std::shared_ptr<uint8_t> buffer(new uint8_t[numBytes], std::default_delete<uint8_t[]>());
+            if (frame->format == AV_PIX_FMT_YUV420P) {
+                if (av_image_copy_to_buffer(buffer.get(), numBytes, frame->data, frame->linesize,
+                                            AV_PIX_FMT_YUV420P, frame->width, frame->height, 1) < 0) {
+                    av_frame_free(&frame);
+                    return;
+                }
+            } else {
+                m_swsContext = sws_getCachedContext(m_swsContext, frame->width, frame->height,
+                                                    static_cast<AVPixelFormat>(frame->format), frame->width,
+                                                    frame->height, AV_PIX_FMT_YUV420P, SWS_BILINEAR,
+                                                    nullptr, nullptr, nullptr);
+                uint8_t* planes[4]{};
+                int linesizes[4]{};
+                if (!m_swsContext || av_image_fill_arrays(planes, linesizes, buffer.get(),
+                    AV_PIX_FMT_YUV420P, frame->width, frame->height, 1) < 0 ||
+                    sws_scale(m_swsContext, frame->data, frame->linesize, 0, frame->height,
+                              planes, linesizes) <= 0) {
                     av_frame_free(&frame);
                     return;
                 }
             }
-            AVFrame* rgbFrame = av_frame_alloc();
-            if (!rgbFrame) {
-                std::cerr << "failed allocate rbgframe" << std::endl;
-                av_frame_free(&rgbFrame);
-                return;
-            }
-
-            int numBytes = av_image_get_buffer_size(AV_PIX_FMT_RGBA, frame->width, frame->height, 1);
-            std::shared_ptr<uint8_t> buffer(new uint8_t[numBytes], std::default_delete<uint8_t[]>());
-            if (av_image_fill_arrays(rgbFrame->data, rgbFrame->linesize, buffer.get(), AV_PIX_FMT_RGBA, frame->width, frame->height, 1) < 0) {
-                av_frame_free(&rgbFrame);
-                av_frame_free(&frame);
-                return;
-            }
-            //开始转换
-            sws_scale(m_swsContext, frame->data, frame->linesize, 0, frame->height, rgbFrame->data, rgbFrame->linesize);
             //复制信息
             auto videoFrame = std::make_shared<IVideoFrame>();
             videoFrame->width = frame->width;
             videoFrame->height = frame->height;
             videoFrame->data = std::move(buffer);
+            videoFrame->fullRange = frame->color_range == AVCOL_RANGE_JPEG;
+            videoFrame->bt709 = frame->colorspace == AVCOL_SPC_BT709;
             videoFrame->pts = frame->pts;
             videoFrame->duration = frame->pkt_duration;
             videoFrame->timebaseNum = m_timeBase.num;
             videoFrame->timebaseDen = m_timeBase.den;
             videoFrame->releaseCallback = m_pipelineReleaseCallback;
-            av_frame_free(&rgbFrame);
             --m_pipelineResourceCount;
             {
                 std::lock_guard<std::recursive_mutex> lock(m_listenerMutex);
@@ -247,6 +254,7 @@ namespace av {
         }
         if (m_swsContext) {
             sws_freeContext(m_swsContext);
+            m_swsContext = nullptr;
         }
     }
 }

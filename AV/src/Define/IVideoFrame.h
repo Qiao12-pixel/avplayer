@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "BaseDef.h"
-#include "../Engine/IGLContext.h"
 
 namespace av {
     struct IVideoFrame {
@@ -21,14 +20,15 @@ namespace av {
         int64_t duration{0};            ///< 持续时间
         int32_t timebaseNum{1};         ///< 时间基数的分子
         int32_t timebaseDen{1};         ///< 时间基数的分母
-        std::shared_ptr<uint8_t> data;  ///< RGBA 数据，为了简化代码，统一使用 RGBA 数据
-        unsigned int textureId{0};      ///< OpenGL 纹理 ID
+        // Packed planar YUV420P (Y, U, V), with tightly packed rows.
+        std::shared_ptr<uint8_t> data;
+        bool fullRange{false};
+        bool bt709{false};
 
         std::weak_ptr<std::function<void()>> releaseCallback;  ///< 释放的回调函数
 
         float GetTimeStamp() const { return pts * 1.0f * timebaseNum / timebaseDen; }  ///< 获取时间戳
         virtual ~IVideoFrame() {
-            if (textureId > 0) glDeleteTextures(1, &textureId);
             if (auto lockedPtr = releaseCallback.lock()) {
                 (*lockedPtr)();
             }

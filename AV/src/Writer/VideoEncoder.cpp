@@ -106,7 +106,7 @@ namespace av {
         m_swsContext = sws_getCachedContext(m_swsContext,
                                             static_cast<int>(videoFrame->width),
                                             static_cast<int>(videoFrame->height),
-                                            AV_PIX_FMT_RGBA,
+                                            AV_PIX_FMT_YUV420P,
                                             m_codecContext->width,
                                             m_codecContext->height,
                                             m_codecContext->pix_fmt,
@@ -119,9 +119,16 @@ namespace av {
             return;
         }
 
-        uint8_t* srcData[4] = {videoFrame->data.get(), nullptr, nullptr, nullptr};
-        int srcLineSize[4] = {static_cast<int>(videoFrame->width) * 4, 0, 0, 0};
-        sws_scale(m_swsContext, srcData, srcLineSize, 0, static_cast<int>(videoFrame->height), frame->data, frame->linesize);
+        const int sourceWidth = static_cast<int>(videoFrame->width);
+        const int sourceHeight = static_cast<int>(videoFrame->height);
+        const int chromaWidth = (sourceWidth + 1) / 2;
+        const int chromaHeight = (sourceHeight + 1) / 2;
+        const size_t yBytes = static_cast<size_t>(sourceWidth) * sourceHeight;
+        const size_t chromaBytes = static_cast<size_t>(chromaWidth) * chromaHeight;
+        const uint8_t* srcData[4] = {videoFrame->data.get(), videoFrame->data.get() + yBytes,
+                                      videoFrame->data.get() + yBytes + chromaBytes, nullptr};
+        const int srcLineSize[4] = {sourceWidth, chromaWidth, chromaWidth, 0};
+        sws_scale(m_swsContext, srcData, srcLineSize, 0, sourceHeight, frame->data, frame->linesize);
 
         const int64_t relativeVideoUs = std::max<int64_t>(0, videoTimestampUs - recordingStartUs);
         int64_t pts = av_rescale_q(relativeVideoUs, AV_TIME_BASE_Q, m_codecContext->time_base);

@@ -18,7 +18,7 @@ namespace av {
     AVSynchronizer::AVSynchronizer() = default;
 
     AVSynchronizer::~AVSynchronizer() {
-        Stop();
+        Shutdown();
     }
 
     bool AVSynchronizer::Init(unsigned int audioChannels, unsigned int sampleRate) {
@@ -109,6 +109,16 @@ namespace av {
         }
     }
 
+    void AVSynchronizer::Shutdown() {
+        m_audioRender.Stop();
+        {
+            std::lock_guard<std::mutex> lock(m_videoQueueMutex);
+            m_videoQueue.clear();
+            ResetVideoClockLocked();
+        }
+        if (m_videoOutput) m_videoOutput->ClearFrame();
+    }
+
     double AVSynchronizer::GetMasterClock() const {
         const double audioClock = m_audioRender.GetClockInSeconds();
         if (audioClock >= 0.0) {
@@ -122,6 +132,10 @@ namespace av {
 
         const auto elapsed = std::chrono::steady_clock::now() - m_videoClockStart;
         return m_videoClockBasePts + std::chrono::duration<double>(elapsed).count();
+    }
+
+    double AVSynchronizer::GetAudioClock() const {
+        return m_audioRender.GetClockInSeconds();
     }
 
     std::shared_ptr<IVideoFrame> AVSynchronizer::TakeReadyVideoFrame(double masterClock, bool useAudioClock) {

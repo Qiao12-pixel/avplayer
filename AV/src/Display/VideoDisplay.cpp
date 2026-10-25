@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <opencv2/imgproc.hpp>
 
 #include "../VideoFilter/FlipVerticalFilter.h"
 #include "../FaceDetect/OpenCVLbfFaceLandmarkDetector.h"
@@ -36,7 +37,11 @@ namespace {
         #version 330 core
         in vec2 vTexCoord;
         out vec4 FragColor;
-        uniform sampler2D uFrameTexture;
+        uniform sampler2D uYTexture;
+        uniform sampler2D uUTexture;
+        uniform sampler2D uVTexture;
+        uniform int uFullRange;
+        uniform int uBt709;
         uniform sampler2D uStickerTexture;
         uniform int uGray;
         uniform int uInvert;
@@ -47,7 +52,18 @@ namespace {
         uniform float uStickerRotation;
         uniform float uStickerOpacity;
         void main() {
-            vec4 color = texture(uFrameTexture, vTexCoord);
+            float y = texture(uYTexture, vTexCoord).r;
+            float u = texture(uUTexture, vTexCoord).r - 0.5;
+            float v = texture(uVTexture, vTexCoord).r - 0.5;
+            if (uFullRange == 0) {
+                y = (y - 16.0 / 255.0) * (255.0 / 219.0);
+                u *= 255.0 / 224.0;
+                v *= 255.0 / 224.0;
+            }
+            vec3 rgb = uBt709 == 1
+                ? vec3(y + 1.5748 * v, y - 0.1873 * u - 0.4681 * v, y + 1.8556 * u)
+                : vec3(y + 1.4020 * v, y - 0.3441 * u - 0.7141 * v, y + 1.7720 * u);
+            vec4 color = vec4(clamp(rgb, 0.0, 1.0), 1.0);
             if (uGray == 1) {
                 float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
                 color.rgb = vec3(gray);
@@ -123,14 +139,14 @@ namespace av {
         gl->glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), reinterpret_cast<void*>(2 * sizeof(float)));
         gl->glEnableVertexAttribArray(1);
 
-        gl->glGenTextures(1, &m_frameTexture);
-        gl->glBindTexture(GL_TEXTURE_2D, m_frameTexture);
-        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        const unsigned char blackPixel[] = {0, 0, 0, 255};
-        gl->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, blackPixel);
+        gl->glGenTextures(3, m_frameTextures);
+        for (GLuint texture : m_frameTextures) {
+            gl->glBindTexture(GL_TEXTURE_2D, texture);
+            gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
 
         EnsureStickerTexture(gl);
         m_initialized = true;
@@ -145,9 +161,9 @@ namespace av {
             gl->glDeleteTextures(1, &m_stickerTexture);
             m_stickerTexture = 0;
         }
-        if (m_frameTexture != 0) {
-            gl->glDeleteTextures(1, &m_frameTexture);
-            m_frameTexture = 0;
+        if (m_frameTextures[0] != 0) {
+            gl->glDeleteTextures(3, m_frameTextures);
+            for (auto& texture : m_frameTextures) texture = 0;
         }
         if (m_ebo != 0) {
             gl->glDeleteBuffers(1, &m_ebo);
@@ -180,15 +196,16 @@ namespace av {
         gl->glViewport(0, 0, width, height);
     }
 
-    void VideoDisplay::Render(QOpenGLFunctions_3_3_Core* gl) {
+    std::shared_ptr<IVideoFrame> VideoDisplay::Render(QOpenGLFunctions_3_3_Core* gl) {
         if (!gl || !m_initialized) {
-            return;
+            return nullptr;
         }
 
         std::shared_ptr<IVideoFrame> frame;
         {
             std::lock_guard<std::mutex> lock(m_frameMutex);
             frame = m_pendingFrame;
+            m_pendingFrame.reset();
         }
 
         gl->glClear(GL_COLOR_BUFFER_BIT);
@@ -205,7 +222,7 @@ namespace av {
         }
 
         if (!m_hasUploadedFrame) {
-            return;
+            return nullptr;
         }
 
         if (m_stickerTextureDirty) {
@@ -214,6 +231,8 @@ namespace av {
 
         gl->glUseProgram(m_program);
         gl->glUniform1i(gl->glGetUniformLocation(m_program, "uFlip"), IsFilterEnabled(VideoFilterType::kFlipVertical) ? 1 : 0);
+        gl->glUniform1i(gl->glGetUniformLocation(m_program, "uFullRange"), m_fullRange ? 1 : 0);
+        gl->glUniform1i(gl->glGetUniformLocation(m_program, "uBt709"), m_bt709 ? 1 : 0);
         gl->glUniform1i(gl->glGetUniformLocation(m_program, "uGray"), IsFilterEnabled(VideoFilterType::kGray) ? 1 : 0);
         gl->glUniform1i(gl->glGetUniformLocation(m_program, "uInvert"), IsFilterEnabled(VideoFilterType::kInvert) ? 1 : 0);
         gl->glUniform1i(gl->glGetUniformLocation(m_program, "uSticker"),
@@ -239,16 +258,20 @@ namespace av {
         gl->glUniform1f(gl->glGetUniformLocation(m_program, "uStickerRotation"), stickerRotation);
         gl->glUniform1f(gl->glGetUniformLocation(m_program, "uStickerOpacity"), stickerOpacity);
 
-        gl->glActiveTexture(GL_TEXTURE0);
-        gl->glBindTexture(GL_TEXTURE_2D, m_frameTexture);
-        gl->glUniform1i(gl->glGetUniformLocation(m_program, "uFrameTexture"), 0);
+        const char* samplerNames[3] = {"uYTexture", "uUTexture", "uVTexture"};
+        for (int plane = 0; plane < 3; ++plane) {
+            gl->glActiveTexture(GL_TEXTURE0 + plane);
+            gl->glBindTexture(GL_TEXTURE_2D, m_frameTextures[plane]);
+            gl->glUniform1i(gl->glGetUniformLocation(m_program, samplerNames[plane]), plane);
+        }
 
-        gl->glActiveTexture(GL_TEXTURE1);
+        gl->glActiveTexture(GL_TEXTURE3);
         gl->glBindTexture(GL_TEXTURE_2D, m_stickerTexture);
-        gl->glUniform1i(gl->glGetUniformLocation(m_program, "uStickerTexture"), 1);
+        gl->glUniform1i(gl->glGetUniformLocation(m_program, "uStickerTexture"), 3);
 
         gl->glBindVertexArray(m_vao);
         gl->glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
+        return frame;
     }
 
     void VideoDisplay::PushFrame(const std::shared_ptr<IVideoFrame>& frame) {
@@ -293,6 +316,14 @@ namespace av {
         return it != m_filters.end() && it->second && it->second->GetInt("enabled") != 0;
     }
 
+    std::tuple<int, int, int> VideoDisplay::TakeFaceDetectionCounts() {
+        const auto counts = std::make_tuple(m_faceDetectionAttempts, m_faceDetectionHits, m_landmarkHits);
+        m_faceDetectionAttempts = 0;
+        m_faceDetectionHits = 0;
+        m_landmarkHits = 0;
+        return counts;
+    }
+
     StickerAnchorMode VideoDisplay::GetStickerAnchorMode() const {
         if (m_stickerRelativePath.find("EyeMask") != std::string::npos) {
             return StickerAnchorMode::kEyeMask;
@@ -327,20 +358,32 @@ namespace av {
     }
 
     void VideoDisplay::UpdateFrameTexture(QOpenGLFunctions_3_3_Core* gl, const std::shared_ptr<IVideoFrame>& frame) {
-        gl->glBindTexture(GL_TEXTURE_2D, m_frameTexture);
         gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        gl->glPixelStorei(GL_UNPACK_ROW_LENGTH, static_cast<GLint>(frame->width));
-
-        if (m_frameWidth != static_cast<int>(frame->width) || m_frameHeight != static_cast<int>(frame->height)) {
-            gl->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, static_cast<GLsizei>(frame->width),
-                             static_cast<GLsizei>(frame->height), 0, GL_RGBA, GL_UNSIGNED_BYTE, frame->data.get());
-            m_frameWidth = static_cast<int>(frame->width);
-            m_frameHeight = static_cast<int>(frame->height);
-        } else {
-            gl->glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_frameWidth, m_frameHeight,
-                                GL_RGBA, GL_UNSIGNED_BYTE, frame->data.get());
+        const int width = static_cast<int>(frame->width);
+        const int height = static_cast<int>(frame->height);
+        const int chromaWidth = (width + 1) / 2;
+        const int chromaHeight = (height + 1) / 2;
+        const bool resize = m_frameWidth != width || m_frameHeight != height;
+        const size_t yBytes = static_cast<size_t>(width) * height;
+        const size_t chromaBytes = static_cast<size_t>(chromaWidth) * chromaHeight;
+        const uint8_t* planes[3] = {frame->data.get(), frame->data.get() + yBytes,
+                                    frame->data.get() + yBytes + chromaBytes};
+        for (int plane = 0; plane < 3; ++plane) {
+            const int planeWidth = plane == 0 ? width : chromaWidth;
+            const int planeHeight = plane == 0 ? height : chromaHeight;
+            gl->glBindTexture(GL_TEXTURE_2D, m_frameTextures[plane]);
+            if (resize) {
+                gl->glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, planeWidth, planeHeight,
+                                 0, GL_RED, GL_UNSIGNED_BYTE, planes[plane]);
+            } else {
+                gl->glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, planeWidth, planeHeight,
+                                    GL_RED, GL_UNSIGNED_BYTE, planes[plane]);
+            }
         }
-        gl->glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        m_frameWidth = width;
+        m_frameHeight = height;
+        m_fullRange = frame->fullRange;
+        m_bt709 = frame->bt709;
         m_hasUploadedFrame = true;
     }
 
@@ -351,14 +394,22 @@ namespace av {
         }
         auto& stickerFilter = it->second;
         ++m_faceDetectFrameCounter;
-        if (!m_faceDetector || (m_faceDetectFrameCounter % m_faceDetectFrameInterval != 0 &&
-                                stickerFilter->GetInt("visible") != 0)) {
+        if (!m_faceDetector || m_faceDetectFrameCounter % m_faceDetectFrameInterval != 0) {
             return;
         }
 
-        const auto faceResult = m_faceDetector->Detect(frame->data.get(),
-                                                       static_cast<int>(frame->width),
-                                                       static_cast<int>(frame->height));
+        const int width = static_cast<int>(frame->width);
+        const int height = static_cast<int>(frame->height);
+        // OpenCV expects continuous I420 for this conversion. For odd dimensions,
+        // the chroma layout cannot be represented by a single Mat row stride.
+        if ((width & 1) || (height & 1)) return;
+        cv::Mat yuv(height * 3 / 2, width, CV_8UC1, frame->data.get());
+        cv::Mat rgba;
+        cv::cvtColor(yuv, rgba, cv::COLOR_YUV2RGBA_I420);
+        const auto faceResult = m_faceDetector->Detect(rgba.data, width, height);
+        ++m_faceDetectionAttempts;
+        if (faceResult.valid) ++m_faceDetectionHits;
+        if (faceResult.landmarks.size() == 68) ++m_landmarkHits;
         const auto placement = m_stickerPlacementEstimator.Estimate(
                 faceResult,
                 static_cast<int>(frame->width),

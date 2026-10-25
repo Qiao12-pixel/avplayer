@@ -6,6 +6,9 @@
 #define PLAYERWIDGET_H
 
 #include <QOpenGLWidget>
+#include <chrono>
+#include <functional>
+#include <vector>
 
 #include "../../AV/include/IVideoFilter.h"
 #include "../../AV/src/Display/VideoDisplay.h"
@@ -24,6 +27,8 @@ public:
     void SetInvertEnabled(bool enabled);
     void SetStickerEnabled(bool enabled);
     void CycleStickerResource();
+    void SetMetricsSources(std::function<double()> audioClock, std::function<bool()> recording);
+    void FlushMetrics();
 
 protected:
     void initializeGL() override;
@@ -31,7 +36,16 @@ protected:
     void paintGL() override;
 
 private:
+    void OnFrameSwapped();
+    void ReportMetrics();
     av::VideoDisplay m_videoDisplay;
+    std::function<double()> m_audioClock;
+    std::function<bool()> m_recording;
+    std::shared_ptr<av::IVideoFrame> m_frameForSwap;
+    std::chrono::steady_clock::time_point m_metricsStart{};
+    int m_swappedFrames{0};
+    std::vector<double> m_absSyncErrorsMs;
+    double m_signedSyncSumMs{0.0};
 };
 
 #endif //PLAYERWIDGET_H

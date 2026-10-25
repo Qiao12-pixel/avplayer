@@ -7,14 +7,16 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QString>
+#include <QProcessEnvironment>
 
 #include <iostream>
+#include <cmath>
 
 #include <opencv2/imgproc.hpp>
 
 namespace av {
     namespace {
-        constexpr const char* kHaarCascadeFallbackPath = "/opt/homebrew/Cellar/opencv/4.13.0_6/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
+        constexpr const char* kCascadeName = "haarcascade_frontalface_default.xml";
     }
 
     OpenCVLbfFaceLandmarkDetector::OpenCVLbfFaceLandmarkDetector() = default;
@@ -78,27 +80,44 @@ namespace av {
 
         std::vector<cv::Rect> faceRects{largestFace};
         std::vector<std::vector<cv::Point2f>> landmarks;
-        if (!m_facemark->fit(bgr, faceRects, landmarks) || landmarks.empty() || landmarks.front().empty()) {
-            return result;
-        }
-
         result.valid = true;
         result.faceRect.x = static_cast<float>(largestFace.x);
         result.faceRect.y = static_cast<float>(largestFace.y);
         result.faceRect.width = static_cast<float>(largestFace.width);
         result.faceRect.height = static_cast<float>(largestFace.height);
-        result.landmarks.reserve(landmarks.front().size());
-        for (const auto& point : landmarks.front()) {
-            result.landmarks.push_back(FacePoint2f{point.x, point.y});
+        if (m_facemark->fit(bgr, faceRects, landmarks) && !landmarks.empty() &&
+            landmarks.front().size() == 68) {
+            const auto& points = landmarks.front();
+            const auto& leftEye = points[36];
+            const auto& rightEye = points[45];
+            const bool plausible = std::isfinite(leftEye.x) && std::isfinite(leftEye.y) &&
+                std::isfinite(rightEye.x) && std::isfinite(rightEye.y) &&
+                leftEye.x >= largestFace.x && rightEye.x <= largestFace.x + largestFace.width &&
+                rightEye.x - leftEye.x >= largestFace.width * 0.1f &&
+                leftEye.y >= largestFace.y && leftEye.y <= largestFace.y + largestFace.height &&
+                rightEye.y >= largestFace.y && rightEye.y <= largestFace.y + largestFace.height;
+            if (plausible) {
+                result.landmarks.reserve(points.size());
+                for (const auto& point : points) {
+                    result.landmarks.push_back(FacePoint2f{point.x, point.y});
+                }
+            }
         }
         return result;
     }
 
     bool OpenCVLbfFaceLandmarkDetector::FindCascadePath(std::string& cascadePath) const {
-        const QString fallbackPath = QString::fromUtf8(kHaarCascadeFallbackPath);
-        if (QFileInfo::exists(fallbackPath)) {
-            cascadePath = fallbackPath.toStdString();
-            return true;
+        const QStringList paths{
+            QProcessEnvironment::systemEnvironment().value("AVPLAYER_HAAR_CASCADE_PATH"),
+            QString("/opt/homebrew/share/opencv5/haarcascades/") + kCascadeName,
+            QString("/opt/homebrew/share/opencv4/haarcascades/") + kCascadeName,
+            QString("/usr/local/share/opencv4/haarcascades/") + kCascadeName
+        };
+        for (const auto& path : paths) {
+            if (!path.isEmpty() && QFileInfo::exists(path)) {
+                cascadePath = path.toStdString();
+                return true;
+            }
         }
 
         try {

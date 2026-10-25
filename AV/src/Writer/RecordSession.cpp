@@ -35,13 +35,17 @@ namespace av {
     bool RecordSession::Start(const RecorderConfig& config) {
         IRecorder* recorder = nullptr;
         std::string tempFilePath;
+        // m_recorder is created once in the constructor. Avoid acquiring its
+        // mutex while holding m_mutex: Recorder callbacks acquire them in the
+        // opposite order.
+        const bool alreadyRecording = m_recorder && m_recorder->IsRecording();
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             if (!m_recorder) {
                 NotifyErrorLocked("录制器未初始化。");
                 return false;
             }
-            if (m_recorder->IsRecording()) {
+            if (alreadyRecording) {
                 NotifyErrorLocked("已有录制会话正在进行中。");
                 return false;
             }
@@ -68,10 +72,11 @@ namespace av {
     bool RecordSession::StopAndSave(const std::string& outputFilePath) {
         IRecordSession::Listener* listener = nullptr;
         std::string tempFilePath;
+        const bool recording = m_recorder && m_recorder->IsRecording();
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             listener = m_listener;
-            if (!m_recorder || !m_recorder->IsRecording()) {
+            if (!recording) {
                 NotifyErrorLocked("当前没有录制中的会话。");
                 return false;
             }
@@ -148,7 +153,6 @@ namespace av {
     }
 
     bool RecordSession::IsRecording() const {
-        std::lock_guard<std::mutex> lock(m_mutex);
         return m_recorder && m_recorder->IsRecording();
     }
 

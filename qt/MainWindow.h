@@ -21,6 +21,7 @@
 #include <QTimer>
 
 #include <iostream>
+#include <atomic>
 
 #include "../AV/src/Engine/AVSynchronizer.h"
 #include "../AV/src/Network/NetworkSession.h"
@@ -42,6 +43,8 @@ class MainWindow : public QMainWindow,
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
+    void StartBenchmark(const QString& filePath, int seconds, bool sticker,
+                        bool record, const QString& outputPath, const QString& capturePath);
 
     void OnFileReaderNotifyAudioSamples(std::shared_ptr<av::IAudioSamples> audioSamples) override;
     void OnFileReaderNotifyVideoFrame(std::shared_ptr<av::IVideoFrame> videoFrame) override;
@@ -99,6 +102,7 @@ private:
     av::AVSynchronizer m_synchronizer;
     av::FileReader* m_fileReader{nullptr};
     std::unique_ptr<av::IRecordSession> m_recordSession;
+    std::atomic<uint64_t> m_playbackGeneration{0};
 };
 
 #endif //MAINWINDOW_H

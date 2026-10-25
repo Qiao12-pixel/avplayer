@@ -124,6 +124,27 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_aiAssistantServ
     connect(m_aiAssistantPanel, &AIAssistantPanel::seekToStartRequested, this, [this] {
         m_aiAssistantService.SeekToStart();
     });
+    connect(m_aiAssistantPanel, &AIAssistantPanel::subtitleVisibilityChanged,
+            m_playerWidget, &PlayerWidget::SetSubtitlesEnabled);
+    m_aiAssistantPanel->SetConfiguration(m_aiAssistantService.IsModelConfigured(), m_aiAssistantService.IsSpeechConfigured(), m_aiAssistantService.ConfigurationStatus());
+    connect(m_aiAssistantPanel, &AIAssistantPanel::transcriptionRequested, &m_aiAssistantService, &av::ai::AIAssistantService::RequestTranscription);
+    connect(m_aiAssistantPanel, &AIAssistantPanel::summaryRequested, &m_aiAssistantService, &av::ai::AIAssistantService::RequestSummary);
+    connect(m_aiAssistantPanel, &AIAssistantPanel::searchRequested, &m_aiAssistantService, &av::ai::AIAssistantService::RequestSemanticSearch);
+    connect(m_aiAssistantPanel, &AIAssistantPanel::editPlanRequested, &m_aiAssistantService, &av::ai::AIAssistantService::RequestEditPlan);
+    connect(m_aiAssistantPanel, &AIAssistantPanel::exportEditPlanRequested, this, [this] {
+        const QString dir = QFileDialog::getExistingDirectory(this, "选择剪辑导出目录");
+        if (!dir.isEmpty()) m_aiAssistantService.ExportEditPlan(dir);
+    });
+    connect(&m_aiAssistantService, &av::ai::AIAssistantService::transcriptLoaded, m_aiAssistantPanel, &AIAssistantPanel::SetTranscript);
+    connect(&m_aiAssistantService, &av::ai::AIAssistantService::transcriptLoaded, m_playerWidget, [this](const QString&) {
+        m_playerWidget->SetSubtitleSegments(m_aiAssistantService.TranscriptSegments());
+        m_aiAssistantPanel->SetSubtitleAvailable(!m_aiAssistantService.TranscriptSegments().isEmpty());
+    });
+    connect(&m_aiAssistantService, &av::ai::AIAssistantService::taskStarted, m_aiAssistantPanel, &AIAssistantPanel::SetTaskStarted);
+    connect(&m_aiAssistantService, &av::ai::AIAssistantService::taskProgress, m_aiAssistantPanel, &AIAssistantPanel::SetTaskProgress);
+    connect(&m_aiAssistantService, &av::ai::AIAssistantService::taskFinished, m_aiAssistantPanel, &AIAssistantPanel::SetTaskResult);
+    connect(&m_aiAssistantService, &av::ai::AIAssistantService::taskFailed, m_aiAssistantPanel, &AIAssistantPanel::SetTaskError);
+    connect(&m_aiAssistantService, &av::ai::AIAssistantService::editPlanReady, m_aiAssistantPanel, &AIAssistantPanel::SetEditPlanReady);
 
     auto* panelTitle = new QLabel("网络控制台", m_sidePanel);
     QFont panelTitleFont;

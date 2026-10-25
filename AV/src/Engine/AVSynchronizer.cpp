@@ -6,7 +6,7 @@
 
 #include <iostream>
 
-#include "../../../qt/UI/PlayerWidget.h"
+#include "../../../qt/ui/PlayerWidget.h"
 
 namespace av {
     namespace {

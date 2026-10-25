@@ -28,9 +28,11 @@
 #include "../AV/src/Reader/Interface/IFileReader.h"
 #include "../AV/src/Writer/IRecorder.h"
 #include "../AV/src/Writer/IRecordSession.h"
-#include "./UI/ClickableSlider.h"
-#include "./UI/PlayerWidget.h"
-#include "UI/ControllerWidget.h"
+#include "../AV/src/AI/AIAssistantService.h"
+#include "./ui/ClickableSlider.h"
+#include "./ui/PlayerWidget.h"
+#include "ui/ControllerWidget.h"
+#include "ui/ai/AIAssistantPanel.h"
 
 namespace av {
     class FileReader;
@@ -38,7 +40,8 @@ namespace av {
 
 class MainWindow : public QMainWindow,
                    public av::IFileReader::Listener,
-                   public av::IRecordSession::Listener {
+                   public av::IRecordSession::Listener,
+                   public av::ai::IPlayerControl {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget *parent = nullptr);
@@ -54,6 +57,8 @@ public:
     void OnRecordSessionSaved(const std::string& outputFilePath) override;
     void OnRecordSessionAborted() override;
     void OnRecordSessionError(const std::string& message) override;
+    void TogglePlayback() override;
+    bool SeekToStart() override;
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -80,9 +85,11 @@ private:
     void updateProgress();
     void appendDebugMessage(const QString& message);
     void refreshNetworkPanel();
+    void syncAiContext();
 
     ClickableSlider* m_progressSlider = nullptr;
     QWidget* m_sidePanel = nullptr;
+    AIAssistantPanel* m_aiAssistantPanel{nullptr};
     PlayerWidget* m_playerWidget = nullptr;
     QLabel* m_currentSourceValueLabel = nullptr;
     QLabel* m_networkStatusValueLabel = nullptr;
@@ -100,6 +107,7 @@ private:
     QStringList m_debugMessages;
     av::NetworkSession m_networkSession;
     av::AVSynchronizer m_synchronizer;
+    av::ai::AIAssistantService m_aiAssistantService;
     av::FileReader* m_fileReader{nullptr};
     std::unique_ptr<av::IRecordSession> m_recordSession;
     std::atomic<uint64_t> m_playbackGeneration{0};

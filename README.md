@@ -2,7 +2,8 @@
 
 AVPlayer 是一款轻量级跨平台音视频播放器，核心基于 **C++ + Qt** 框架开发，依托 FFmpeg 实现音视频编解码与播放，结合 OpenCV 完成 AI 人脸关键点检测与滤镜特效。项目支持主流音视频格式播放、音视频录制、自定义滤镜特效，同时提供简洁的 Qt 交互界面，适配 macOS 等平台，可作为音视频开发学习、技术面试项目展示的优质案例。
 
-<img width="1440" height="932" alt="image" src="https://github.com/user-attachments/assets/006e4dfa-5077-41b2-89b2-63b9c5bc5aa7" />
+<img width="1440" height="930" alt="image" src="https://github.com/user-attachments/assets/bb8f9ff9-b5ac-43b6-b4d0-a3d2c20bef94" />
+
 # ✨ 核心功能
 
 ## 基础播放

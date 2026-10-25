@@ -24,3 +24,8 @@ out/
 # 系统垃圾文件
 .DS_Store
 Thumbs.db
+
+# 配置目录
+config/
+config/secret_key.yaml
+resource/

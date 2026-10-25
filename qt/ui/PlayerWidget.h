@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "../../AV/include/IVideoFilter.h"
+#include "../../AV/src/AI/TranscriptStore.h"
 #include "../../AV/src/Display/VideoDisplay.h"
 
 class PlayerWidget final : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
@@ -21,6 +22,8 @@ public:
 
     void PushFrame(const std::shared_ptr<av::IVideoFrame>& frame);
     void ClearFrame();
+    void SetSubtitleSegments(const QVector<av::ai::TranscriptSegment>& segments);
+    void SetSubtitlesEnabled(bool enabled);
     void SetFilterEnabled(av::VideoFilterType type, bool enabled);
     void SetFlipEnabled(bool enabled);
     void SetGrayEnabled(bool enabled);
@@ -42,6 +45,9 @@ private:
     std::function<double()> m_audioClock;
     std::function<bool()> m_recording;
     std::shared_ptr<av::IVideoFrame> m_frameForSwap;
+    QVector<av::ai::TranscriptSegment> m_subtitleSegments;
+    qint64 m_presentedMs{-1};
+    bool m_subtitlesEnabled{true};
     std::chrono::steady_clock::time_point m_metricsStart{};
     int m_swappedFrames{0};
     std::vector<double> m_absSyncErrorsMs;

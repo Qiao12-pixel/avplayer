@@ -4,7 +4,9 @@
 
 #include "PlayerWidget.h"
 
+#include <QFontMetrics>
 #include <QMetaObject>
+#include <QPainter>
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -31,7 +33,21 @@ void PlayerWidget::PushFrame(const std::shared_ptr<av::IVideoFrame>& frame) {
 void PlayerWidget::ClearFrame() {
     ReportMetrics();
     m_videoDisplay.ClearFrame();
+    m_presentedMs = -1;
     QMetaObject::invokeMethod(this, "update", Qt::QueuedConnection);
+}
+
+void PlayerWidget::SetSubtitleSegments(const QVector<av::ai::TranscriptSegment>& segments) {
+    m_subtitleSegments = segments;
+    std::sort(m_subtitleSegments.begin(), m_subtitleSegments.end(), [](const auto& a, const auto& b) {
+        return a.startMs < b.startMs;
+    });
+    update();
+}
+
+void PlayerWidget::SetSubtitlesEnabled(bool enabled) {
+    m_subtitlesEnabled = enabled;
+    update();
 }
 
 void PlayerWidget::SetMetricsSources(std::function<double()> audioClock, std::function<bool()> recording) {
@@ -79,7 +95,42 @@ void PlayerWidget::resizeGL(int w, int h) {
 }
 
 void PlayerWidget::paintGL() {
+    QPainter painter(this);
+    painter.beginNativePainting();
     m_frameForSwap = m_videoDisplay.Render(this);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glActiveTexture(GL_TEXTURE0);
+    painter.endNativePainting();
+    if (m_frameForSwap) m_presentedMs = qRound64(m_frameForSwap->GetTimeStamp() * 1000.0);
+    if (!m_subtitlesEnabled || m_presentedMs < 0 || m_subtitleSegments.isEmpty()) return;
+
+    const auto it = std::find_if(m_subtitleSegments.cbegin(), m_subtitleSegments.cend(), [this](const auto& segment) {
+        return segment.startMs <= m_presentedMs && m_presentedMs < segment.endMs;
+    });
+    if (it == m_subtitleSegments.cend() || it->text.trimmed().isEmpty()) return;
+
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setRenderHint(QPainter::TextAntialiasing);
+    QFont subtitleFont = font();
+    subtitleFont.setPixelSize(20);
+    subtitleFont.setWeight(QFont::DemiBold);
+    painter.setFont(subtitleFont);
+
+    const int maxTextWidth = std::max(100, width() * 3 / 4);
+    const QFontMetrics metrics(subtitleFont);
+    const QRect measured = metrics.boundingRect(QRect(0, 0, maxTextWidth, height() / 3),
+        Qt::AlignCenter | Qt::TextWordWrap, it->text);
+    const int boxWidth = std::min(width() - 24, std::max(100, measured.width() + 32));
+    const int boxHeight = measured.height() + 20;
+    const QRect box((width() - boxWidth) / 2,
+        height() - std::max(44, height() / 8) - boxHeight, boxWidth, boxHeight);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(0, 0, 0, 178));
+    painter.drawRoundedRect(box, 6, 6);
+    painter.setPen(Qt::white);
+    painter.drawText(box.adjusted(16, 10, -16, -10), Qt::AlignCenter | Qt::TextWordWrap, it->text);
 }
 
 void PlayerWidget::OnFrameSwapped() {

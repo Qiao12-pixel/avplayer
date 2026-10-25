@@ -65,7 +65,7 @@ if (EXISTS "/opt/homebrew/Cellar/qtbase/6.10.2/lib/cmake/Qt6/Qt6Config.cmake"
     AND EXISTS "/opt/homebrew/Cellar/qtdeclarative/6.10.2/lib/cmake/Qt6Quick/Qt6QuickConfig.cmake")
     set(Qt6_DIR "/opt/homebrew/Cellar/qtbase/6.10.2/lib/cmake/Qt6" CACHE PATH
         "Qt6 package configuration directory" FORCE)
-    foreach (QT_COMPONENT Core Gui Widgets OpenGL OpenGLWidgets CoreTools GuiTools WidgetsTools Multimedia Quick Qml)
+    foreach (QT_COMPONENT Core Gui Widgets OpenGL OpenGLWidgets Network Concurrent CoreTools GuiTools WidgetsTools Multimedia Quick Qml)
         if (QT_COMPONENT STREQUAL "Multimedia")
             set(QT_COMPONENT_ROOT "/opt/homebrew/Cellar/qtmultimedia/6.10.2/lib/cmake/Qt6Multimedia")
         elseif (QT_COMPONENT STREQUAL "Quick" OR QT_COMPONENT STREQUAL "Qml")
@@ -85,7 +85,7 @@ if (EXISTS "/opt/homebrew/Cellar/qtbase/6.10.2/lib/cmake/Qt6/Qt6Config.cmake"
 endif ()
 
 # 添加 QT
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Multimedia Quick)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Multimedia Quick Network Concurrent)
 
 find_package(GLEW REQUIRED)
 find_package(glfw3 REQUIRED)
@@ -107,6 +107,14 @@ set(INCLUDE_DIRS
 file(GLOB_RECURSE LIBRARY_SOURCE_FILES ${PROJECT_ROOT_DIR}/LearnAV/*.cpp)
 # 创建静态库
 add_library(${PROJECT_NAME} STATIC ${LIBRARY_SOURCE_FILES}
+        AV/src/AI/AIConfig.cpp
+        AV/src/AI/AIConfig.h
+        AV/src/AI/DoubaoApiClient.cpp
+        AV/src/AI/DoubaoApiClient.h
+        AV/src/AI/DoubaoSpeechClient.cpp
+        AV/src/AI/DoubaoSpeechClient.h
+        AV/src/AI/TranscriptStore.cpp
+        AV/src/AI/TranscriptStore.h
         AV/src/AI/AIAssistantService.cpp
         AV/src/AI/AIAssistantService.h
         AV/src/AI/IPlayerControl.h
@@ -181,6 +189,7 @@ add_library(${PROJECT_NAME} STATIC ${LIBRARY_SOURCE_FILES}
         AV/src/Writer/VideoEncoder.h
 
 )
+target_compile_definitions(${PROJECT_NAME} PRIVATE AVPLAYER_PROJECT_ROOT="${PROJECT_ROOT_DIR}")
 # 为静态库添加头文件路径
 #target_include_directories(${PROJECT_NAME} PUBLIC ${INCLUDE_DIRS} ${PROJECT_ROOT_DIR}/3rdparty/InspireFace/include)
 # 为静态库添加链接库
@@ -193,6 +202,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         Qt6::OpenGL
         Qt6::OpenGLWidgets
         Qt6::Multimedia
+        Qt6::Network
         GLEW::GLEW
         glfw
         "-framework OpenGL" # macOS 原生 OpenGL 框架
@@ -204,7 +214,9 @@ add_executable(AVPlayer ${DEMO_SOURCE_FILES})
 # 为 AVPlayer 添加头文件路径
 target_include_directories(AVPlayer PRIVATE ${PROJECT_ROOT_DIR}/qt ${PROJECT_ROOT_DIR}/LearnAV/qt)
 # 为 AVPlayer 添加链接库
-target_link_libraries(AVPlayer Qt6::Core Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Quick ${PROJECT_NAME})
+# Link Concurrent directly so QtMultimedia's opt-path dependency resolves to
+# the same pinned qtbase release as the rest of the process.
+target_link_libraries(AVPlayer Qt6::Core Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Quick Qt6::Network Qt6::Concurrent ${PROJECT_NAME})
 
 if (APPLE AND EXISTS "/opt/homebrew/Cellar/qtbase/6.10.2/lib")
     # Homebrew's `opt` symlink may point qtbase at a newer minor release than
@@ -223,6 +235,12 @@ if (APPLE AND EXISTS "/opt/homebrew/Cellar/qtbase/6.10.2/lib")
         COMMAND install_name_tool -change
         "/opt/homebrew/opt/qtbase/lib/QtWidgets.framework/Versions/A/QtWidgets"
         "${AVPLAYER_QTBASE_LIB}/QtWidgets.framework/Versions/A/QtWidgets" $<TARGET_FILE:AVPlayer>
+        COMMAND install_name_tool -change
+        "/opt/homebrew/opt/qtbase/lib/QtNetwork.framework/Versions/A/QtNetwork"
+        "${AVPLAYER_QTBASE_LIB}/QtNetwork.framework/Versions/A/QtNetwork" $<TARGET_FILE:AVPlayer>
+        COMMAND install_name_tool -change
+        "/opt/homebrew/opt/qtbase/lib/QtConcurrent.framework/Versions/A/QtConcurrent"
+        "${AVPLAYER_QTBASE_LIB}/QtConcurrent.framework/Versions/A/QtConcurrent" $<TARGET_FILE:AVPlayer>
         COMMAND install_name_tool -change
         "/opt/homebrew/opt/qtbase/lib/QtOpenGL.framework/Versions/A/QtOpenGL"
         "${AVPLAYER_QTBASE_LIB}/QtOpenGL.framework/Versions/A/QtOpenGL" $<TARGET_FILE:AVPlayer>

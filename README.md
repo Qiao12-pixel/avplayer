@@ -3,8 +3,7 @@
 AVPlayer 是一款基于 **C++17、Qt、FFmpeg 和 OpenGL** 的桌面音视频播放器。项目包含本地/网络媒体播放、音视频同步、录制、截图与视频滤镜；OpenCV 用于人脸关键点检测和动态贴纸定位。AI 助手提供字幕转写、视频摘要、字幕语义搜索和智能剪辑，Agent 工作台通过 Python 编排客户端工具。
 
 Agent 编排采用 Python Runtime，播放器能力由 C++ 工具执行，双方通过 `avplayer.agent.v1` JSON Lines 协议通信。各模块职责与完整数据流见下文“项目结构与数据流”。
-
-<img width="1444" height="938" alt="image" src="https://github.com/user-attachments/assets/9c9fb150-e99f-420d-8967-6b84c2fc340d" />
+<img width="1440" height="932" alt="image" src="https://github.com/user-attachments/assets/77833f4a-5ed4-46df-89e2-33adb9c060b3" />
 
 
 # ✨ 核心功能

@@ -1,13 +1,8 @@
 # 📋 项目简介
 
-AVPlayer 是一款轻量级跨平台音视频播放器，核心基于 **C++ + Qt** 框架开发，依托 FFmpeg 实现音视频编解码与播放，结合 OpenCV 完成 AI 人脸关键点检测与滤镜特效。项目支持主流音视频格式播放、音视频录制、自定义滤镜特效，同时提供简洁的 Qt 交互界面，适配 macOS 等平台，可作为音视频开发学习、技术面试项目展示的优质案例。
-### 增加了avplayer的ai能力，包括：字幕转写，视频摘要生成，语义搜索，智能剪辑
+AVPlayer 是一款基于 **C++17、Qt、FFmpeg 和 OpenGL** 的桌面音视频播放器。项目包含本地/网络媒体播放、音视频同步、录制、截图与视频滤镜；OpenCV 用于人脸关键点检测和动态贴纸定位。AI 助手提供字幕转写、视频摘要、字幕语义搜索和智能剪辑，Agent 工作台通过 Python 编排客户端工具。
 
-Agent 编排采用 Python Runtime，播放器能力由 C++ 工具执行，双方通过
-`avplayer.agent.v1` JSON Lines 协议通信。当前已完成通信、工具注册和任务
-生命周期，并已接入方舟模型规划、媒体上下文、播放控制、截图、字幕转写、
-摘要、语义搜索和智能剪辑工具。Agent 面板提交目标后，Python Runtime
-返回工具调用，C++ 执行后把结果回传，模型再继续规划或返回最终答复。
+Agent 编排采用 Python Runtime，播放器能力由 C++ 工具执行，双方通过 `avplayer.agent.v1` JSON Lines 协议通信。各模块职责与完整数据流见下文“项目结构与数据流”。
 
 <img width="1444" height="938" alt="image" src="https://github.com/user-attachments/assets/9c9fb150-e99f-420d-8967-6b84c2fc340d" />
 
@@ -16,32 +11,37 @@ Agent 编排采用 Python Runtime，播放器能力由 C++ 工具执行，双方
 
 ## 基础播放
 
--   支持 **MP4、AVI、MKV、FLV** 等主流音视频格式解码播放
--   跨平台兼容（基于 Qt，支持 macOS/Windows）
--   播放控制：播放 / 暂停、进度拖拽、音量调节、倍速播放
+-   基于 FFmpeg 解复用与解码常见音视频格式；实际可播放格式取决于所链接的 FFmpeg 构建
+-   支持本地文件以及由 FFmpeg 打开的 HTTP(S)、RTSP、RTMP 等网络媒体源
+-   播放控制：播放 / 暂停、进度拖拽和跳转到开头
 
 ## 高级功能
 
--   🎥 **音视频录制**：支持将播放流 / 本地摄像头画面录制为 MP4 格式
--   🎨 **自定义滤镜**：集成基础滤镜特效（如灰度、美颜、边缘检测）
--   🧠 **AI 人脸检测**：基于 OpenCV 实现人脸关键点检测，叠加显示检测框 / 关键点
--   🔧 **上传视频修复**：兼容异常格式视频解析，优化上传视频播放兼容性
+-   🎥 **音视频录制**：对当前媒体的解码帧重新编码，封装为 MP4
+-   🎨 **视频滤镜**：灰度、反相、垂直翻转及动态贴纸
+-   🧠 **人脸关键点**：通过 OpenCV LBF 检测并辅助贴纸定位
+-   📸 **画面截图**：保存播放器当前显示画面
+-   🤖 **AI 与 Agent**：字幕转写、文本分析、语义搜索、智能剪辑及自然语言工具编排
+
 # 🏗️ 技术栈
-|  技术模块| 工具 |
-|--|--|
-|开发语言  | c++17
-UI框架 |qt6
-|  音视频引擎| ffmpeg |
-|AI视觉|Opencv|
-|  构建工具| CMake Conan
-|平台适配|  macOS|
+
+| 模块 | 技术 |
+| --- | --- |
+| 客户端 | C++17、Qt 6 Widgets / Multimedia |
+| 解复用、解码、编码与封装 | FFmpeg |
+| 视频渲染 | OpenGL、GLSL、`QOpenGLWidget` |
+| 人脸关键点与贴纸定位 | OpenCV LBF |
+| AI 助手与 Agent | 豆包语音 API、火山方舟文本模型、Python 3 Runtime |
+| 构建与依赖 | CMake、Conan |
+
 ## 🚀 快速开始
 
 ### 环境依赖
 
--   操作系统：macOS 10.15+ / Windows 10+
--   开发工具：Qt Creator / CLion、CMake 3.20+、Conan 2.0+
--   依赖库：FFmpeg 4.4+、OpenCV 4.5+、Qt Multimedia
+-   当前开发构建环境：macOS、Qt 6（各模块版本一致）；其他平台需自行验证依赖和构建配置
+-   构建工具：CMake 3.23+、Conan 2.x、C++17 编译器
+-   核心依赖：FFmpeg、包含 `face` 模块的 OpenCV、Qt 6 Widgets / Multimedia / OpenGL
+-   AI/Agent 运行依赖：Python 3，以及可在 `PATH` 中调用的 `ffmpeg` 命令；在线能力需要配置豆包 API 密钥
 
 
 -   **克隆项目**  
@@ -65,16 +65,127 @@ UI框架 |qt6
     ```
     ./AVPlayer
     ```
-📁 项目结构
+## 📁 项目结构与数据流
+
+以下目录树按实际源码职责整理；`resource/` 和 `config/secret_key.yaml` 属于本地资源与配置，构建产物不在树中。
+
+```text
+AVPlayer/
+├── AV/
+│   ├── include/                 # 公共视频滤镜接口
+│   └── src/
+│       ├── Reader/              # FileReader、DeMuxer、音视频解码器
+│       │   └── Interface/       # 读取、解复用、解码的 Listener 接口
+│       ├── Engine/              # AVSynchronizer、AudioRender、GLContext
+│       ├── Display/             # VideoDisplay：YUV 纹理和 GLSL 渲染
+│       ├── VideoFilter/         # 灰度、反相、翻转、贴纸滤镜
+│       ├── FaceDetect/          # OpenCV LBF 人脸关键点与贴纸位置
+│       ├── Writer/              # RecordSession、Recorder、编码器、MP4 封装
+│       ├── Network/             # 媒体源 URL 类型与连接状态
+│       ├── AI/                  # 字幕、豆包语音/文本 API、摘要/搜索/剪辑
+│       ├── Agent/               # Python 桥接、JSON 协议、工具分发、片段导出
+│       ├── Core/                # 线程通知与任务池
+│       └── Define/              # 音视频帧、压缩包等基础数据结构
+├── qt/
+│   ├── Main.cpp                 # Qt 应用入口
+│   ├── MainWindow.{h,cpp}       # 播放器装配、事件与工具接线
+│   └── ui/
+│       ├── PlayerWidget.*       # QOpenGLWidget 画面与字幕叠加
+│       ├── ControllerWidget.*   # 底部播放、录制、截图与滤镜控制
+│       ├── ai/                  # AI 助手侧栏界面
+│       └── agent/               # Agent 工作台侧栏界面
+├── agent/
+│   ├── main.py                  # Python Runtime 入口、stdin/stdout 循环
+│   ├── runtime.py               # 目标到工具调用的编排循环
+│   ├── protocol.py              # JSON Lines 消息格式
+│   ├── ark_client.py            # 方舟文本模型请求
+│   ├── tools/                   # 工具扩展说明，当前无独立 Python 工具实现
+│   └── schemas/                 # 协议/参数扩展说明，当前无独立 schema 文件
+├── config/
+│   ├── secret_key.example.yaml  # API 配置样例
+│   └── secret_key.yaml          # 本地密钥，需自行创建且不应提交
+├── resource/                    # 本地示例媒体和贴纸素材
+├── CMakeLists.txt               # C++/Qt 目标及依赖配置
+├── conanfile.txt                # Conan 依赖声明
+└── README.md
 ```
-AVPlayer/ ├── AV/ # 音视频核心模块（编解码、播放、录制） 
-					├── qt/ # Qt 界面交互模块 
-					├── resource/ # 资源文件（UI布局、图标、配置） 
-					├── CMakeLists.txt # CMake 构建配置 
-					├── conanfile.txt # Conan 依赖配置 
-					├── README.md # 项目说明 
-					└── .gitignore # Git 忽略配置
+
+### 播放与渲染数据流
+
+```mermaid
+flowchart LR
+    Source[本地文件或网络 URL] --> Demux[DeMuxer / FFmpeg 解复用]
+    Demux --> AudioDecoder[AudioDecoder]
+    Demux --> VideoDecoder[VideoDecoder]
+    AudioDecoder --> AudioSamples[PCM 音频采样]
+    VideoDecoder --> VideoFrames[YUV420P 视频帧]
+    AudioSamples --> Sync[AVSynchronizer]
+    VideoFrames --> Sync
+    Sync --> AudioOut[AudioRender / QAudioSink]
+    Sync --> Player[PlayerWidget / VideoDisplay]
+    Player --> GPU[OpenGL YUV 纹理 + GLSL 转 RGB、滤镜]
+    GPU --> Overlay[Qt 叠加字幕]
 ```
+
+`MainWindow` 创建 `FileReader`，由它串联解复用器与两个解码器；解码回调把音视频数据交给 `AVSynchronizer`。音频经 `QAudioSink` 输出，音频时钟可用时作为主时钟；无有效音频时回退到视频时钟。视频调度使用 `视频帧 PTS - 主时钟`，超前不超过 10 ms 时显示，使用音频时钟且落后超过 80 ms 时丢帧。视频解码器把非 YUV420P 帧转换为 YUV420P；`VideoDisplay` 将 Y、U、V 平面上传 GPU，由片段着色器完成 YUV→RGB、灰度/反相及贴纸合成。字幕依据当前呈现帧的时间戳在 `PlayerWidget` 中叠加，因此不进入编码帧本身。
+
+拖动进度条时，`MainWindow` 将目标位置交给 `FileReader/DeMuxer`；解复用器发出 `KFlush` 标记包，音视频解码器清理旧包并刷新解码状态，视频同步队列收到刷新帧后清空旧画面及视频时钟，再从新位置的时间戳继续调度。
+
+| 跨层数据 | 产生位置 | 消费位置 | 关键字段或用途 |
+| --- | --- | --- | --- |
+| `IAVPacket` | `DeMuxer` | `AudioDecoder` / `VideoDecoder` | FFmpeg 压缩包、时间基与 `KFlush` 标记 |
+| `IAudioSamples` | `AudioDecoder` | `AVSynchronizer` / `Recorder` | 重采样后的 PCM、PTS、采样率与声道数 |
+| `IVideoFrame` | `VideoDecoder` | `AVSynchronizer` / `Recorder` | 紧凑排列的 YUV420P、PTS、色彩范围与矩阵信息 |
+| `TranscriptSegment` | 豆包语音识别或旁路 `.srt` | 字幕显示、摘要/搜索/剪辑 | 毫秒起止时间与字幕文本 |
+| Agent JSON 消息 | Qt 或 Python Runtime | 对端进程 | 协议版本、消息类型、`request_id`、工具参数或结果 |
+
+解复用器和音视频解码器各有工作线程及异步队列，`Listener` 回调把数据推向下一层。音视频数据以 `shared_ptr` 传递；包/帧销毁时通过释放回调归还流水线额度，限制上游继续生产。同步器的视频队列上限为 60 帧，超限时丢弃最早帧。音频样本进入 Qt 音频设备前经主线程排队调用，避免从解码线程直接操作 `QAudioSink`。
+
+### 录制数据流
+
+```mermaid
+flowchart LR
+    Decoded[解码后的音频采样 / 视频帧] --> Window[MainWindow 解码回调]
+    Window --> Playback[同步与播放分支]
+    Window --> Session[RecordSession 录制分支]
+    Session --> Recorder[Recorder]
+    Recorder --> AudioEncoder[AudioEncoder / AAC]
+    Recorder --> VideoEncoder[VideoEncoder / H.264]
+    AudioEncoder --> Muxer[Mp4Muxer]
+    VideoEncoder --> Muxer
+    Muxer --> MP4[临时 MP4 → 保存文件]
+```
+
+录制接收的是解码后的音视频帧，与播放分支并行；`RecordSession` 管理开始、停止、临时文件和最终保存。这里不是对播放器窗口进行屏幕录制，界面字幕和仅在显示阶段合成的滤镜/贴纸不会自动写入录制输出。
+
+### AI 助手与 Agent 数据流
+
+```mermaid
+flowchart LR
+    Goal[AgentPanel 目标] --> Bridge[AgentBridge / QProcess]
+    Bridge <-->|JSON Lines| Runtime[agent/main.py + runtime.py]
+    Runtime <-->|文本请求| Ark[方舟模型]
+    Runtime -->|tool_call| Bridge
+    Bridge -->|C++ 分发| Tools[播放器工具 / AIAssistantService / ClipExportService]
+    Tools -->|tool_result| Bridge
+    Bridge --> Runtime
+    Runtime -->|final| Bridge
+    Bridge --> UI[AgentPanel 输出]
+```
+
+独立的 **AI 助手侧栏**直接调用 `AIAssistantService`：FFmpeg 提取音轨 → 豆包语音识别 → 视频旁生成 `.ai.srt` → 播放器按时间轴显示字幕；摘要、语义搜索和智能剪辑再使用字幕文本与时间戳调用方舟文本模型。**Agent 侧栏**则先将自然语言目标交给 Python Runtime，模型在 C++ 提供的工具目录中选择操作；Qt 执行后回传结果，模型继续调用工具或返回最终答案。随机片段导出由 `ClipExportService` 直接对当前本地视频调用 FFmpeg，不依赖字幕。
+
+| Agent 工具 | 执行方式 | 前置条件 / 结果 |
+| --- | --- | --- |
+| `get_media_context`、`player_control` | C++ 同步 | 读取媒体状态，或对已加载媒体执行播放控制 |
+| `capture_screenshot` | C++ 同步 | 需要已呈现画面；输出 PNG |
+| `transcribe_subtitle` | `AIAssistantService` 异步 | 本地媒体、语音 API；生成 `.ai.srt` |
+| `summarize_video`、`semantic_search` | `AIAssistantService` 异步 | 已加载字幕；搜索还需要查询文本 |
+| `smart_edit`、`export_clip` | `AIAssistantService` 异步 | 带时间戳的字幕与本地媒体；先生成建议，再指定目录导出 MP4 |
+| `export_random_clip` | `ClipExportService` 异步 | 本地媒体与 `duration_ms`；直接输出随机起点的 MP4 |
+
+两进程通过 `avplayer.agent.v1` 协议传输 `goal`、`tool_catalog`、`tool_call`、`tool_result`、`status`、`final` 等消息，`request_id` 关联调用和结果。当前模型通过提示词返回 JSON 指令，而非 API 原生 function calling；Agent 面板中的“执行计划”仍是预置展示，不代表实时生成的计划。摘要、语义搜索与智能剪辑只分析字幕，尚无视频帧视觉理解或向量索引；`agent/tools/` 与 `agent/schemas/` 目前是扩展预留目录。
+
 ## 🎯 功能演示
 
 ### 1. 基础播放
@@ -85,17 +196,18 @@ AVPlayer/ ├── AV/ # 音视频核心模块（编解码、播放、录制）
 
 ### 2. 录制与滤镜
 
--   一键录制当前播放画面，输出 MP4 格式文件
--   实时切换滤镜特效，叠加人脸检测框，直观展示 AI 检测效果
+-   录制当前媒体的解码音视频帧，输出 MP4 格式文件
+-   实时切换灰度、反相、垂直翻转及动态贴纸
 
-### 3. 异常处理
+### 3. AI 助手与 Agent
 
--   自动修复上传视频的编码异常，提升视频播放兼容性
+-   对本地视频生成时间轴字幕，并在播放画面中同步显示
+-   使用字幕生成摘要、搜索相关片段或生成剪辑建议；Agent 可将自然语言目标转换为工具调用
 
 ## 📝 开发计划
 
 -   新增更多滤镜特效（马赛克、复古、动态模糊）
--   支持流媒体协议（RTSP/RTMP）播放
+-   提高 RTSP/RTMP 等网络媒体源的稳定性与断线恢复能力
 -   优化硬件解码性能，适配更多编解码器
 -   移动端（Android/iOS）跨平台适配
 

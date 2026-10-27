@@ -6,6 +6,10 @@
 
 #include <algorithm>
 #include <QDir>
+#include <QImage>
+#include <QMessageBox>
+#include <QStandardPaths>
+#include <QCoreApplication>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFont>
@@ -13,7 +17,7 @@
 
 #include "../AV/src/Reader/FileReader.h"
 
-MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_aiAssistantService(*this) {
+MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_aiAssistantService(*this), m_agentBridge(this) {
     m_synchronizer.Init();
     m_recordSession.reset(av::IRecordSession::Create());
     if (m_recordSession) {
@@ -90,13 +94,17 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_aiAssistantServ
     auto* panelTabs = new QHBoxLayout();
     auto* networkTab = new QPushButton("网络", m_sidePanel);
     auto* aiTab = new QPushButton("AI 助手", m_sidePanel);
-    networkTab->setStyleSheet("QPushButton { padding: 7px 10px; border-radius: 9px; color: #aab8cc; background: rgba(15, 23, 42, 0.55); border: 1px solid transparent; } QPushButton:checked { color: white; background: #315efb; }");
+    auto* agentTab = new QPushButton("Agent", m_sidePanel);
+    networkTab->setStyleSheet("QPushButton { padding: 7px 8px; border-radius: 8px; color: #aab8cc; background: rgba(15, 23, 42, 0.55); border: 1px solid transparent; } QPushButton:hover:enabled { color: white; background: #1d3850; } QPushButton:checked { color: white; background: #315efb; }");
     aiTab->setStyleSheet(networkTab->styleSheet());
+    agentTab->setStyleSheet(networkTab->styleSheet());
     networkTab->setCheckable(true);
     aiTab->setCheckable(true);
+    agentTab->setCheckable(true);
     networkTab->setChecked(true);
     panelTabs->addWidget(networkTab);
     panelTabs->addWidget(aiTab);
+    panelTabs->addWidget(agentTab);
     sideLayout->addLayout(panelTabs);
 
     auto* panelStack = new QStackedWidget(m_sidePanel);
@@ -105,18 +113,41 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_aiAssistantServ
     networkLayout->setContentsMargins(0, 0, 0, 0);
     networkLayout->setSpacing(10);
     m_aiAssistantPanel = new AIAssistantPanel(panelStack);
+    m_agentPanel = new AgentPanel(panelStack);
     panelStack->addWidget(networkPage);
     panelStack->addWidget(m_aiAssistantPanel);
+    panelStack->addWidget(m_agentPanel);
     sideLayout->addWidget(panelStack, 1);
-    connect(networkTab, &QPushButton::clicked, this, [panelStack, networkTab, aiTab] {
+    connect(networkTab, &QPushButton::clicked, this, [panelStack, networkTab, aiTab, agentTab] {
         panelStack->setCurrentIndex(0);
         networkTab->setChecked(true);
         aiTab->setChecked(false);
+        agentTab->setChecked(false);
     });
-    connect(aiTab, &QPushButton::clicked, this, [panelStack, networkTab, aiTab] {
+    connect(aiTab, &QPushButton::clicked, this, [panelStack, networkTab, aiTab, agentTab] {
         panelStack->setCurrentIndex(1);
         networkTab->setChecked(false);
         aiTab->setChecked(true);
+        agentTab->setChecked(false);
+    });
+    connect(agentTab, &QPushButton::clicked, this, [panelStack, networkTab, aiTab, agentTab] {
+        panelStack->setCurrentIndex(2);
+        networkTab->setChecked(false);
+        aiTab->setChecked(false);
+        agentTab->setChecked(true);
+    });
+    setupAgentRuntime();
+    connect(m_agentPanel, &AgentPanel::goalSubmitted, this, [this](const QString& goal) {
+        if (!m_agentBridge.IsRunning() && !m_agentBridge.Start()) return;
+        m_agentPanel->SetRuntimeStatus("正在提交任务…", true);
+        m_agentBridge.SubmitGoal(goal, "desktop");
+    });
+    connect(m_agentPanel, &AgentPanel::stopRequested, this, [this] {
+        m_agentClipExporter.Cancel();
+        m_agentClipRequestId.clear();
+        m_agentClipSessionId.clear();
+        m_agentBridge.Stop();
+        m_agentPanel->SetRuntimeStatus("任务已停止，可重新提交目标。", false);
     });
     connect(m_aiAssistantPanel, &AIAssistantPanel::playPauseRequested, this, [this] {
         m_aiAssistantService.TogglePlayback();
@@ -223,6 +254,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_aiAssistantServ
     connect(m_controllerWidget, &ControllerWidget::importRequested, this, &MainWindow::onImportRequested);
     connect(m_controllerWidget, &ControllerWidget::playToggled, this, &MainWindow::onPlayToggled);
     connect(m_controllerWidget, &ControllerWidget::recordToggled, this, &MainWindow::onRecordToggled);
+    connect(m_controllerWidget, &ControllerWidget::screenshotRequested, this, &MainWindow::onScreenshotRequested);
     connect(m_controllerWidget, &ControllerWidget::flipFilterToggled, m_playerWidget, &PlayerWidget::SetFlipEnabled);
     connect(m_controllerWidget, &ControllerWidget::grayFilterToggled, m_playerWidget, &PlayerWidget::SetGrayEnabled);
     connect(m_controllerWidget, &ControllerWidget::invertFilterToggled, m_playerWidget, &PlayerWidget::SetInvertEnabled);
@@ -435,6 +467,161 @@ void MainWindow::onRecordToggled(bool recording) {
     appendDebugMessage("录制会话已启动，停止时将询问保存位置。");
 }
 
+void MainWindow::onScreenshotRequested() {
+    if (!m_hasOpenedFile || !m_playerWidget) return;
+    if (!m_playerWidget->HasPresentedFrame()) {
+        QMessageBox::warning(this, "截图失败", "当前画面尚未准备好，请稍后重试。");
+        return;
+    }
+
+    const QImage image = m_playerWidget->grabFramebuffer();
+    if (image.isNull()) { QMessageBox::warning(this, "截图失败", "当前画面尚未准备好，请稍后重试。"); return; }
+
+    const QString pictures = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+    const QString directory = pictures.isEmpty() || !QDir(pictures).exists() ? QDir::homePath() : pictures;
+    const QString basename = QFileInfo(m_currentFilePath).completeBaseName();
+    const QString suggestedPath = QDir(directory).filePath(
+        QString("%1_%2.png").arg(basename.isEmpty() ? "AVPlayer" : basename,
+                                QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss")));
+    QFileDialog dialog(this, "保存当前画面", suggestedPath, "PNG 图片 (*.png)");
+    dialog.setAcceptMode(QFileDialog::AcceptSave);
+    dialog.setDefaultSuffix("png");
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    const QString path = dialog.selectedFiles().constFirst();
+    if (!image.save(path, "PNG")) {
+        QMessageBox::warning(this, "截图失败", "无法写入截图文件，请检查保存路径和权限。");
+        return;
+    }
+    m_controllerWidget->ShowScreenshotSaved();
+    appendDebugMessage("截图已保存：" + path);
+}
+
+bool MainWindow::SaveScreenshotToPath(const QString& path) {
+    if (!m_playerWidget || !m_playerWidget->HasPresentedFrame()) return false;
+    const QImage image = m_playerWidget->grabFramebuffer();
+    return !image.isNull() && image.save(path, "PNG");
+}
+
+void MainWindow::setupAgentRuntime() {
+    QStringList scriptCandidates;
+#ifdef AVPLAYER_PROJECT_ROOT
+    scriptCandidates << QDir(QStringLiteral(AVPLAYER_PROJECT_ROOT)).filePath("agent/main.py");
+#endif
+    scriptCandidates << QDir::current().filePath("agent/main.py")
+                     << QDir(QCoreApplication::applicationDirPath()).filePath("../agent/main.py");
+    QString scriptPath;
+    for (const auto& candidate : scriptCandidates) if (QFileInfo::exists(candidate)) { scriptPath = QFileInfo(candidate).absoluteFilePath(); break; }
+    m_agentBridge.SetRuntimeScript(scriptPath);
+    QString projectDirectory = QDir::currentPath();
+#ifdef AVPLAYER_PROJECT_ROOT
+    projectDirectory = QStringLiteral(AVPLAYER_PROJECT_ROOT);
+#endif
+    m_agentBridge.SetWorkingDirectory(projectDirectory);
+
+    m_agentTools.Register({"get_media_context", "读取当前媒体和播放状态", QJsonObject{{"type", "object"}}, [this](const QJsonObject&) {
+        const auto& context = m_aiAssistantService.GetMediaContext();
+        return QJsonObject{{"success", true}, {"path", QString::fromStdString(context.source)}, {"loaded", context.loaded}, {"playing", context.playing}, {"width", context.width}, {"height", context.height}, {"duration_ms", static_cast<qint64>(m_durationSeconds * 1000)}};
+    }});
+    m_agentTools.Register({"player_control", "控制播放或回到开头", QJsonObject{{"type", "object"}}, [this](const QJsonObject& args) {
+        const QString action = args.value("action").toString();
+        if (action == "play_pause") return QJsonObject{{"success", m_aiAssistantService.TogglePlayback()}};
+        if (action == "seek_start") return QJsonObject{{"success", m_aiAssistantService.SeekToStart()}};
+        return QJsonObject{{"success", false}, {"error", "未知播放操作"}};
+    }});
+    m_agentTools.Register({"capture_screenshot", "保存当前播放器画面", QJsonObject{{"type", "object"}}, [this](const QJsonObject& args) {
+        QString path = args.value("output_path").toString();
+        if (path.isEmpty()) path = QDir(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation)).filePath("avplayer-agent.png");
+        return QJsonObject{{"success", SaveScreenshotToPath(path)}, {"path", path}};
+    }});
+    m_agentTools.Register({"export_random_clip", "从当前本地视频随机选择起点，导出指定时长的 MP4；duration_ms 为片段长度（毫秒），可选 output_dir 为输出目录；成功时返回绝对文件路径。", QJsonObject{{"type", "object"}, {"properties", QJsonObject{{"duration_ms", QJsonObject{{"type", "integer"}, {"minimum", 1}, {"description", "片段长度，毫秒；3 秒为 3000"}}}, {"output_dir", QJsonObject{{"type", "string"}}}}}, {"required", QJsonArray{"duration_ms"}}}, [](const QJsonObject&) { return QJsonObject{{"success", false}, {"error", "异步工具须经 MainWindow 调用。"}}; }});
+    for (const QString& name : {QString("transcribe_subtitle"), QString("summarize_video"), QString("semantic_search"), QString("smart_edit"), QString("export_clip")}) {
+        const QString description = name == "export_clip"
+            ? "导出已有智能剪辑建议；必须先调用 smart_edit 生成建议。不能用于随机导出。"
+            : QString("AVPlayer 媒体工具：%1").arg(name);
+        m_agentTools.Register({name, description, QJsonObject{{"type", "object"}}, [](const QJsonObject&) { return QJsonObject{{"success", false}, {"error", "异步工具须经 MainWindow 调用。"}}; }});
+    }
+    connect(&m_agentClipExporter, &av::agent::ClipExportService::completed, this, [this](const QJsonObject& result) {
+        if (m_agentClipRequestId.isEmpty()) return;
+        m_agentBridge.SendToolResult(m_agentClipRequestId, m_agentClipSessionId, "export_random_clip", result);
+        const bool success = result.value("success").toBool();
+        m_agentPanel->SetToolStatus("随机片段导出", success ? "已完成" : "失败");
+        m_agentPanel->SetAgentOutput(success
+            ? QString("已导出 %1 秒随机片段：\n%2\n起点：%3 秒")
+                  .arg(result.value("duration_ms").toInteger() / 1000.0, 0, 'f', 1)
+                  .arg(result.value("path").toString())
+                  .arg(result.value("start_ms").toInteger() / 1000.0, 0, 'f', 3)
+            : "片段导出失败：" + result.value("error").toString());
+        m_agentPanel->SetRuntimeStatus(result.value("success").toBool()
+            ? "片段已导出：" + result.value("path").toString()
+            : "片段导出失败：" + result.value("error").toString(), result.value("success").toBool());
+        m_agentClipRequestId.clear();
+        m_agentClipSessionId.clear();
+    });
+    connect(&m_agentBridge, &av::agent::AgentBridge::runtimeStarted, this, [this] {
+        m_agentPanel->SetRuntimeStatus("Runtime 已连接", true);
+        m_agentBridge.SendToolCatalog(m_agentTools.Definitions());
+    });
+    connect(&m_agentBridge, &av::agent::AgentBridge::messageReceived, this, &MainWindow::handleAgentMessage);
+    connect(&m_agentBridge, &av::agent::AgentBridge::protocolError, this, [this](const QString& error) {
+        m_agentPanel->SetRuntimeStatus(error, false);
+        m_agentPanel->SetAgentOutput(error);
+    });
+    connect(&m_aiAssistantService, &av::ai::AIAssistantService::taskFinished, this, [this](const QString& task, const QString& result) {
+        if (m_agentPendingRequestId.isEmpty()) return;
+        const QHash<QString, QString> names{{"字幕转写", "transcribe_subtitle"}, {"视频摘要", "summarize_video"}, {"语义搜索", "semantic_search"}, {"智能剪辑", "smart_edit"}, {"智能剪辑导出", "export_clip"}};
+        if (names.value(task) != m_agentPendingTool) return;
+        m_agentBridge.SendToolResult(m_agentPendingRequestId, m_agentPendingSessionId, m_agentPendingTool, QJsonObject{{"success", true}, {"result", result}});
+        m_agentPendingRequestId.clear(); m_agentPendingSessionId.clear(); m_agentPendingTool.clear();
+    });
+    connect(&m_aiAssistantService, &av::ai::AIAssistantService::taskFailed, this, [this](const QString& task, const QString& error) {
+        Q_UNUSED(task);
+        if (m_agentPendingRequestId.isEmpty()) return;
+        m_agentBridge.SendToolResult(m_agentPendingRequestId, m_agentPendingSessionId, m_agentPendingTool, QJsonObject{{"success", false}, {"error", error}});
+        m_agentPendingRequestId.clear(); m_agentPendingSessionId.clear(); m_agentPendingTool.clear();
+    });
+}
+
+void MainWindow::handleAgentMessage(const av::agent::AgentMessage& message) {
+    if (message.type == "plan") { m_agentPanel->SetPlan(message.payload.value("steps").toArray()); return; }
+    if (message.type == "status") { m_agentPanel->SetRuntimeStatus(message.payload.value("status").toString(), true); return; }
+    if (message.type == "final") { m_agentPanel->SetAgentOutput(message.payload.value("text").toString()); return; }
+    if (message.type == "error") { m_agentPanel->SetRuntimeStatus(message.payload.value("error").toString(), false); return; }
+    if (message.type != "tool_call") return;
+    const QString tool = message.tool;
+    if (tool == "export_random_clip") {
+        if (!m_agentClipRequestId.isEmpty()) {
+            m_agentBridge.SendToolResult(message.requestId, message.sessionId, tool,
+                                         QJsonObject{{"success", false}, {"error", "已有片段正在导出。"}});
+            return;
+        }
+        const qint64 durationMs = message.arguments.value("duration_ms").toInteger();
+        QString error;
+        if (!m_agentClipExporter.StartRandomClip(m_currentFilePath,
+                static_cast<qint64>(m_durationSeconds * 1000), durationMs,
+                message.arguments.value("output_dir").toString(), &error)) {
+            m_agentBridge.SendToolResult(message.requestId, message.sessionId, tool,
+                                         QJsonObject{{"success", false}, {"error", error}});
+            m_agentPanel->SetToolStatus("随机片段导出", "失败");
+            m_agentPanel->SetAgentOutput("片段导出失败：" + error);
+            m_agentPanel->SetRuntimeStatus(error, false);
+            return;
+        }
+        m_agentClipRequestId = message.requestId;
+        m_agentClipSessionId = message.sessionId;
+        m_agentPanel->SetToolStatus("随机片段导出", "导出中");
+        m_agentPanel->SetRuntimeStatus("正在导出随机片段…", true);
+        return;
+    }
+    if (tool == "transcribe_subtitle") { m_agentPendingTool = tool; m_agentPendingRequestId = message.requestId; m_agentPendingSessionId = message.sessionId; m_aiAssistantService.RequestTranscription(); return; }
+    if (tool == "summarize_video") { m_agentPendingTool = tool; m_agentPendingRequestId = message.requestId; m_agentPendingSessionId = message.sessionId; m_aiAssistantService.RequestSummary(); return; }
+    if (tool == "semantic_search") { m_agentPendingTool = tool; m_agentPendingRequestId = message.requestId; m_agentPendingSessionId = message.sessionId; m_aiAssistantService.RequestSemanticSearch(message.arguments.value("query").toString()); return; }
+    if (tool == "smart_edit") { m_agentPendingTool = tool; m_agentPendingRequestId = message.requestId; m_agentPendingSessionId = message.sessionId; m_aiAssistantService.RequestEditPlan(message.arguments.value("instruction").toString()); return; }
+    if (tool == "export_clip") { m_agentPendingTool = tool; m_agentPendingRequestId = message.requestId; m_agentPendingSessionId = message.sessionId; m_aiAssistantService.ExportEditPlan(message.arguments.value("output_dir").toString()); return; }
+    const QJsonObject result = m_agentTools.Dispatch(tool, message.arguments);
+    m_agentBridge.SendToolResult(message.requestId, message.sessionId, tool, result);
+}
+
 void MainWindow::onTick() {
     m_synchronizer.Tick();
     updateProgress();
@@ -505,6 +692,7 @@ void MainWindow::releaseFileReader() {
         m_controllerWidget->SetPlaying(false);
         m_controllerWidget->SetRecording(false);
         m_controllerWidget->SetRecordEnabled(false);
+        m_controllerWidget->SetScreenshotEnabled(false);
     }
 }
 
@@ -542,6 +730,7 @@ void MainWindow::startPlayback(const QString& filePath) {
     if (m_controllerWidget) {
         m_controllerWidget->SetPlaying(true);
         m_controllerWidget->SetRecordEnabled(true);
+        m_controllerWidget->SetScreenshotEnabled(true);
     }
     syncAiContext();
 }

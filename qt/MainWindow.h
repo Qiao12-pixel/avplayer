@@ -29,10 +29,14 @@
 #include "../AV/src/Writer/IRecorder.h"
 #include "../AV/src/Writer/IRecordSession.h"
 #include "../AV/src/AI/AIAssistantService.h"
+#include "../AV/src/Agent/AgentBridge.h"
+#include "../AV/src/Agent/ClipExportService.h"
+#include "../AV/src/Agent/ToolDispatcher.h"
 #include "./ui/ClickableSlider.h"
 #include "./ui/PlayerWidget.h"
 #include "ui/ControllerWidget.h"
 #include "ui/ai/AIAssistantPanel.h"
+#include "ui/agent/AgentPanel.h"
 
 namespace av {
     class FileReader;
@@ -75,6 +79,7 @@ private slots:
     void onNetworkStopRequested();
     void onPlayToggled(bool playing);
     void onRecordToggled(bool recording);
+    void onScreenshotRequested();
     void onTick();
 
 private:
@@ -86,10 +91,14 @@ private:
     void appendDebugMessage(const QString& message);
     void refreshNetworkPanel();
     void syncAiContext();
+    void setupAgentRuntime();
+    void handleAgentMessage(const av::agent::AgentMessage& message);
+    bool SaveScreenshotToPath(const QString& path);
 
     ClickableSlider* m_progressSlider = nullptr;
     QWidget* m_sidePanel = nullptr;
     AIAssistantPanel* m_aiAssistantPanel{nullptr};
+    AgentPanel* m_agentPanel{nullptr};
     PlayerWidget* m_playerWidget = nullptr;
     QLabel* m_currentSourceValueLabel = nullptr;
     QLabel* m_networkStatusValueLabel = nullptr;
@@ -108,6 +117,14 @@ private:
     av::NetworkSession m_networkSession;
     av::AVSynchronizer m_synchronizer;
     av::ai::AIAssistantService m_aiAssistantService;
+    av::agent::AgentBridge m_agentBridge;
+    av::agent::ClipExportService m_agentClipExporter;
+    av::agent::ToolDispatcher m_agentTools;
+    QString m_agentPendingRequestId;
+    QString m_agentPendingSessionId;
+    QString m_agentPendingTool;
+    QString m_agentClipRequestId;
+    QString m_agentClipSessionId;
     av::FileReader* m_fileReader{nullptr};
     std::unique_ptr<av::IRecordSession> m_recordSession;
     std::atomic<uint64_t> m_playbackGeneration{0};

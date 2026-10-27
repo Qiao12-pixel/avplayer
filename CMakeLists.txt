@@ -107,6 +107,15 @@ set(INCLUDE_DIRS
 file(GLOB_RECURSE LIBRARY_SOURCE_FILES ${PROJECT_ROOT_DIR}/LearnAV/*.cpp)
 # 创建静态库
 add_library(${PROJECT_NAME} STATIC ${LIBRARY_SOURCE_FILES}
+        AV/src/Agent/AgentBridge.cpp
+        AV/src/Agent/AgentBridge.h
+        AV/src/Agent/AgentProtocol.cpp
+        AV/src/Agent/AgentProtocol.h
+        AV/src/Agent/ClipExportService.cpp
+        AV/src/Agent/ClipExportService.h
+        AV/src/Agent/IAgentTool.h
+        AV/src/Agent/ToolDispatcher.cpp
+        AV/src/Agent/ToolDispatcher.h
         AV/src/AI/AIConfig.cpp
         AV/src/AI/AIConfig.h
         AV/src/AI/DoubaoApiClient.cpp
@@ -211,6 +220,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 file(GLOB_RECURSE DEMO_SOURCE_FILES ${PROJECT_ROOT_DIR}/qt/*.cpp)
 # 创建 AVPlayer
 add_executable(AVPlayer ${DEMO_SOURCE_FILES})
+target_compile_definitions(AVPlayer PRIVATE AVPLAYER_PROJECT_ROOT="${PROJECT_ROOT_DIR}")
 # 为 AVPlayer 添加头文件路径
 target_include_directories(AVPlayer PRIVATE ${PROJECT_ROOT_DIR}/qt ${PROJECT_ROOT_DIR}/LearnAV/qt)
 # 为 AVPlayer 添加链接库

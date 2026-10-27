@@ -11,8 +11,17 @@ QString Stamp(qint64 ms) {
         .arg((ms / 1000) % 60, 2, 10, QChar('0')).arg(ms % 1000, 3, 10, QChar('0'));
 }
 }
-qint64 TranscriptStore::MaxEndMs() const { qint64 latest = 0; for (const auto& segment : m_segments) latest = qMax(latest, segment.endMs); return latest; }
-void TranscriptStore::Clear() { m_text.clear(); m_sourcePath.clear(); m_segments.clear(); }
+qint64 TranscriptStore::MaxEndMs() const {
+    qint64 latest = 0;
+    for (const auto& segment : m_segments)
+        latest = qMax(latest, segment.endMs);
+    return latest;
+}
+void TranscriptStore::Clear() {
+    m_text.clear();
+    m_sourcePath.clear();
+    m_segments.clear();
+}
 bool TranscriptStore::LoadSidecar(const QString& mediaPath) {
     Clear();
     const QFileInfo info(mediaPath);

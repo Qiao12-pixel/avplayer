@@ -5,6 +5,7 @@
 #include "ControllerWidget.h"
 
 #include <QFileDialog>
+#include <QTimer>
 
 ControllerWidget::ControllerWidget(QWidget *parent) : QWidget(parent){
     m_btnImport = new QPushButton("导入", this);
@@ -16,6 +17,12 @@ ControllerWidget::ControllerWidget(QWidget *parent) : QWidget(parent){
     m_btnExport = new QPushButton("录制", this);
     m_btnExport->setEnabled(false);
     connect(m_btnExport, &QPushButton::clicked, this, &ControllerWidget::onRecordBtnClicked);
+
+    m_btnScreenshot = new QPushButton("截图", this);
+    m_btnScreenshot->setFixedWidth(88);
+    m_btnScreenshot->setEnabled(false);
+    m_btnScreenshot->setToolTip("保存当前播放器画面为 PNG");
+    connect(m_btnScreenshot, &QPushButton::clicked, this, &ControllerWidget::screenshotRequested);
 
     m_btnVideoFilterFlipVertical = new QPushButton("垂直翻转", this);
     m_btnVideoFilterGray = new QPushButton("黑白滤镜", this);
@@ -38,6 +45,7 @@ ControllerWidget::ControllerWidget(QWidget *parent) : QWidget(parent){
     layout->addWidget(m_btnImport);
     layout->addWidget(m_btnPlay);
     layout->addWidget(m_btnExport);
+    layout->addWidget(m_btnScreenshot);
     layout->addStretch();
     layout->addWidget(m_btnVideoFilterFlipVertical);
     layout->addWidget(m_btnVideoFilterGray);
@@ -59,6 +67,16 @@ void ControllerWidget::SetRecording(bool recording) {
 
 void ControllerWidget::SetRecordEnabled(bool enabled) {
     m_btnExport->setEnabled(enabled);
+}
+
+void ControllerWidget::SetScreenshotEnabled(bool enabled) {
+    m_btnScreenshot->setEnabled(enabled);
+    if (!enabled) m_btnScreenshot->setText("截图");
+}
+
+void ControllerWidget::ShowScreenshotSaved() {
+    m_btnScreenshot->setText("已保存");
+    QTimer::singleShot(1800, this, [this] { m_btnScreenshot->setText("截图"); });
 }
 
 void ControllerWidget::onImportBtnClicked() {

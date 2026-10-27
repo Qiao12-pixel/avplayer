@@ -22,11 +22,14 @@ public:
     void SetPlaying(bool playing);
     void SetRecording(bool recording);
     void SetRecordEnabled(bool enabled);
+    void SetScreenshotEnabled(bool enabled);
+    void ShowScreenshotSaved();
 
 signals:
     void importRequested(const QString& filePath);
     void playToggled(bool playing);
     void recordToggled(bool recording);
+    void screenshotRequested();
     void stickerAssetSwitchRequested();
     void flipFilterToggled(bool enabled);
     void grayFilterToggled(bool enabled);
@@ -42,6 +45,7 @@ private:
     QPushButton* m_btnImport{nullptr};
     QPushButton* m_btnPlay{nullptr};
     QPushButton* m_btnExport{nullptr};
+    QPushButton* m_btnScreenshot{nullptr};
 
     QPushButton* m_btnVideoFilterFlipVertical{nullptr};
     QPushButton* m_btnVideoFilterGray{nullptr};

@@ -22,6 +22,7 @@ public:
 
     void PushFrame(const std::shared_ptr<av::IVideoFrame>& frame);
     void ClearFrame();
+    bool HasPresentedFrame() const { return m_presentedMs >= 0; }
     void SetSubtitleSegments(const QVector<av::ai::TranscriptSegment>& segments);
     void SetSubtitlesEnabled(bool enabled);
     void SetFilterEnabled(av::VideoFilterType type, bool enabled);

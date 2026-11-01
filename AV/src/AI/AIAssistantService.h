@@ -6,9 +6,8 @@
 #include <QVector>
 #include <string>
 #include "IPlayerControl.h"
-#include "DoubaoApiClient.h"
-#include "DoubaoSpeechClient.h"
 #include "TranscriptStore.h"
+#include <QJsonArray>
 namespace av::ai {
 struct MediaContext {
     std::string source;
@@ -20,22 +19,28 @@ class AIAssistantService final : public QObject {
     Q_OBJECT
 public:
     explicit AIAssistantService(IPlayerControl& playerControl, QObject* parent = nullptr);
+    void SetConfiguration(bool modelReady, bool speechReady, const QString& status);
     void UpdateMediaContext(MediaContext context);
     const MediaContext& GetMediaContext() const { return m_mediaContext; }
     bool TogglePlayback();
     bool SeekToStart();
-    bool IsModelConfigured() const { return m_doubao.IsConfigured(); }
-    bool IsSpeechConfigured() const { return m_speech.IsConfigured(); }
+    bool IsModelConfigured() const { return m_modelConfigured; }
+    bool IsSpeechConfigured() const { return m_speechConfigured; }
     const QString& ConfigurationStatus() const { return m_configurationStatus; }
     bool HasTranscript() const { return m_transcript.IsLoaded(); }
     const QVector<TranscriptSegment>& TranscriptSegments() const { return m_transcript.Segments(); }
     bool HasEditPlan() const { return !m_editSegments.isEmpty(); }
+    QString TranscriptText() const { return m_transcript.Text(); }
+    qint64 TranscriptMaxEndMs() const { return m_transcript.MaxEndMs(); }
+    bool SaveRecognition(const QJsonArray& segments, const QString& sourcePath, QString* error);
+    bool ApplyEditPlan(const QJsonArray& segments, const QString& sourcePath, QString* error);
     void RequestTranscription();
     void RequestSummary();
     void RequestSemanticSearch(const QString& query);
     void RequestEditPlan(const QString& instruction);
     void ExportEditPlan(const QString& outputDir);
 signals:
+    void modelTaskRequested(const QString& task, const QJsonObject& arguments);
     void transcriptLoaded(const QString& sourcePath);
     void taskStarted(const QString& taskName);
     void taskProgress(const QString& taskName, const QString& message);
@@ -43,19 +48,15 @@ signals:
     void taskFailed(const QString& taskName, const QString& message);
     void editPlanReady(bool available);
 private:
-    bool BeginChat(const QString& name);
     void ExportNext();
     IPlayerControl& m_playerControl;
     MediaContext m_mediaContext;
-    DoubaoApiClient m_doubao;
-    DoubaoSpeechClient m_speech;
     TranscriptStore m_transcript;
+    bool m_modelConfigured{false};
+    bool m_speechConfigured{false};
     QString m_configurationStatus;
     QString m_mediaPath;
-    QString m_transcribePath;
-    QString m_chatMediaPath;
     QString m_exportMediaPath;
-    QString m_activeTask;
     QVector<EditSegment> m_editSegments;
     QProcess m_exportProcess;
     QString m_exportDir;

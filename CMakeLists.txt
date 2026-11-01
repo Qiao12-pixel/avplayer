@@ -109,6 +109,8 @@ file(GLOB_RECURSE LIBRARY_SOURCE_FILES ${PROJECT_ROOT_DIR}/LearnAV/*.cpp)
 add_library(${PROJECT_NAME} STATIC ${LIBRARY_SOURCE_FILES}
         AV/src/Agent/AgentBridge.cpp
         AV/src/Agent/AgentBridge.h
+        AV/src/Agent/AudioExtractionService.cpp
+        AV/src/Agent/AudioExtractionService.h
         AV/src/Agent/AgentProtocol.cpp
         AV/src/Agent/AgentProtocol.h
         AV/src/Agent/ClipExportService.cpp
@@ -116,12 +118,6 @@ add_library(${PROJECT_NAME} STATIC ${LIBRARY_SOURCE_FILES}
         AV/src/Agent/IAgentTool.h
         AV/src/Agent/ToolDispatcher.cpp
         AV/src/Agent/ToolDispatcher.h
-        AV/src/AI/AIConfig.cpp
-        AV/src/AI/AIConfig.h
-        AV/src/AI/DoubaoApiClient.cpp
-        AV/src/AI/DoubaoApiClient.h
-        AV/src/AI/DoubaoSpeechClient.cpp
-        AV/src/AI/DoubaoSpeechClient.h
         AV/src/AI/TranscriptStore.cpp
         AV/src/AI/TranscriptStore.h
         AV/src/AI/AIAssistantService.cpp

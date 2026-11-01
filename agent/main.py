@@ -14,14 +14,15 @@ from runtime import AgentRuntime
 
 def main() -> int:
     runtime = AgentRuntime(sys.stdout)
-    emit(message("ready", "runtime", capabilities=["goal", "tool_result"], tools=[]))
+    emit(message("ready", "runtime", capabilities=["goal", "task", "tool_result"],
+                 model_configured=bool(runtime.config.get("doubao_api_key") and runtime.config.get("doubao_model")),
+                 speech_configured=bool(runtime.config.get("doubao_speech_api_key")),
+                 config_status="Python Runtime 已读取本地配置（密钥尚未验证）。"))
     for payload, error in read_messages():
         if error:
             emit(message("error", "protocol", error=error))
             continue
-        runtime.handle(payload, lambda result: emit(message(
-            "status", result.get("request_id", ""), result.get("session_id", ""),
-            status="tool_result_received", tool=result.get("tool", ""))))
+        runtime.handle(payload)
     return 0
 
 

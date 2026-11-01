@@ -21,6 +21,7 @@ public:
     void Stop();
     bool IsRunning() const { return m_process.state() != QProcess::NotRunning; }
     void SubmitGoal(const QString& goal, const QString& sessionId);
+    void SubmitTask(const QString& task, const QJsonObject& arguments, const QString& sessionId);
     void SendToolCatalog(const QJsonArray& tools);
     void SendToolResult(const QString& requestId, const QString& sessionId,
                         const QString& tool, const QJsonObject& result);

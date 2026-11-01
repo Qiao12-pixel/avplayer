@@ -30,6 +30,7 @@
 #include "../AV/src/Writer/IRecordSession.h"
 #include "../AV/src/AI/AIAssistantService.h"
 #include "../AV/src/Agent/AgentBridge.h"
+#include "../AV/src/Agent/AudioExtractionService.h"
 #include "../AV/src/Agent/ClipExportService.h"
 #include "../AV/src/Agent/ToolDispatcher.h"
 #include "./ui/ClickableSlider.h"
@@ -118,6 +119,7 @@ private:
     av::AVSynchronizer m_synchronizer;
     av::ai::AIAssistantService m_aiAssistantService;
     av::agent::AgentBridge m_agentBridge;
+    av::agent::AudioExtractionService m_audioExtraction;
     av::agent::ClipExportService m_agentClipExporter;
     av::agent::ToolDispatcher m_agentTools;
     QString m_agentPendingRequestId;
@@ -125,6 +127,8 @@ private:
     QString m_agentPendingTool;
     QString m_agentClipRequestId;
     QString m_agentClipSessionId;
+    QString m_audioExtractionRequestId;
+    QString m_audioExtractionSessionId;
     av::FileReader* m_fileReader{nullptr};
     std::unique_ptr<av::IRecordSession> m_recordSession;
     std::atomic<uint64_t> m_playbackGeneration{0};

@@ -144,8 +144,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_aiAssistantServ
     });
     connect(m_agentPanel, &AgentPanel::stopRequested, this, [this] {
         m_agentClipExporter.Cancel();
+        m_audioExtraction.Cancel();
         m_agentClipRequestId.clear();
         m_agentClipSessionId.clear();
+        m_audioExtractionRequestId.clear();
+        m_audioExtractionSessionId.clear();
         m_agentBridge.Stop();
         m_agentPanel->SetRuntimeStatus("任务已停止，可重新提交目标。", false);
     });
@@ -158,6 +161,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_aiAssistantServ
     connect(m_aiAssistantPanel, &AIAssistantPanel::subtitleVisibilityChanged,
             m_playerWidget, &PlayerWidget::SetSubtitlesEnabled);
     m_aiAssistantPanel->SetConfiguration(m_aiAssistantService.IsModelConfigured(), m_aiAssistantService.IsSpeechConfigured(), m_aiAssistantService.ConfigurationStatus());
+    connect(&m_aiAssistantService, &av::ai::AIAssistantService::modelTaskRequested, this,
+            [this](const QString& task, const QJsonObject& arguments) {
+        if (!m_agentBridge.IsRunning() && !m_agentBridge.Start()) {
+            emit m_aiAssistantService.taskFailed(task, "无法启动 Python AI Runtime。请安装 agent/requirements.txt。");
+            return;
+        }
+        m_agentBridge.SubmitTask(task, arguments, "ai-sidebar");
+    });
     connect(m_aiAssistantPanel, &AIAssistantPanel::transcriptionRequested, &m_aiAssistantService, &av::ai::AIAssistantService::RequestTranscription);
     connect(m_aiAssistantPanel, &AIAssistantPanel::summaryRequested, &m_aiAssistantService, &av::ai::AIAssistantService::RequestSummary);
     connect(m_aiAssistantPanel, &AIAssistantPanel::searchRequested, &m_aiAssistantService, &av::ai::AIAssistantService::RequestSemanticSearch);
@@ -518,10 +529,44 @@ void MainWindow::setupAgentRuntime() {
     projectDirectory = QStringLiteral(AVPLAYER_PROJECT_ROOT);
 #endif
     m_agentBridge.SetWorkingDirectory(projectDirectory);
+    const QString virtualPython = QDir(projectDirectory).filePath(".venv/bin/python");
+    if (QFileInfo(virtualPython).isExecutable()) m_agentBridge.SetPythonProgram(virtualPython);
 
     m_agentTools.Register({"get_media_context", "读取当前媒体和播放状态", QJsonObject{{"type", "object"}}, [this](const QJsonObject&) {
         const auto& context = m_aiAssistantService.GetMediaContext();
         return QJsonObject{{"success", true}, {"path", QString::fromStdString(context.source)}, {"loaded", context.loaded}, {"playing", context.playing}, {"width", context.width}, {"height", context.height}, {"duration_ms", static_cast<qint64>(m_durationSeconds * 1000)}};
+    }});
+    m_agentTools.Register({"get_transcript", "读取当前视频的字幕文本、来源和时间戳状态", QJsonObject{{"type", "object"}}, [this](const QJsonObject&) {
+        const auto& context = m_aiAssistantService.GetMediaContext();
+        return QJsonObject{{"success", context.loaded}, {"source_path", QString::fromStdString(context.source)},
+                           {"text", m_aiAssistantService.TranscriptText()},
+                           {"has_timestamps", !m_aiAssistantService.TranscriptSegments().isEmpty()},
+                           {"max_end_ms", m_aiAssistantService.TranscriptMaxEndMs()}};
+    }});
+    m_agentTools.Register({"extract_audio", "用 FFmpeg 从本地视频提取 16 kHz 单声道 MP3 音轨，返回临时文件路径。",
+        QJsonObject{{"type", "object"}, {"properties", QJsonObject{{"source_path", QJsonObject{{"type", "string"}}}}},
+                    {"required", QJsonArray{"source_path"}}},
+        [](const QJsonObject&) { return QJsonObject{{"success", false}, {"error", "异步工具须经 MainWindow 调用。"}}; }});
+    m_agentTools.Register({"save_transcript", "保存识别出的带时间戳字幕", QJsonObject{{"type", "object"},
+        {"properties", QJsonObject{{"source_path", QJsonObject{{"type", "string"}}},
+                                     {"segments", QJsonObject{{"type", "array"}}}}},
+        {"required", QJsonArray{"source_path", "segments"}}}, [this](const QJsonObject& args) {
+        QString error;
+        const bool saved = m_aiAssistantService.SaveRecognition(args.value("segments").toArray(),
+                                                                 args.value("source_path").toString(), &error);
+        return QJsonObject{{"success", saved}, {"path", saved ? m_aiAssistantService.GetMediaContext().loaded
+            ? QFileInfo(args.value("source_path").toString()).path() + "/" +
+              QFileInfo(args.value("source_path").toString()).completeBaseName() + ".ai.srt" : QString{} : QString{}},
+                           {"error", error}};
+    }});
+    m_agentTools.Register({"set_edit_plan", "验证并保存基于字幕时间戳的剪辑建议", QJsonObject{{"type", "object"},
+        {"properties", QJsonObject{{"source_path", QJsonObject{{"type", "string"}}},
+                                     {"segments", QJsonObject{{"type", "array"}}}}},
+        {"required", QJsonArray{"source_path", "segments"}}}, [this](const QJsonObject& args) {
+        QString error;
+        const bool saved = m_aiAssistantService.ApplyEditPlan(args.value("segments").toArray(),
+                                                               args.value("source_path").toString(), &error);
+        return QJsonObject{{"success", saved}, {"error", error}};
     }});
     m_agentTools.Register({"player_control", "控制播放或回到开头", QJsonObject{{"type", "object"}}, [this](const QJsonObject& args) {
         const QString action = args.value("action").toString();
@@ -535,12 +580,10 @@ void MainWindow::setupAgentRuntime() {
         return QJsonObject{{"success", SaveScreenshotToPath(path)}, {"path", path}};
     }});
     m_agentTools.Register({"export_random_clip", "从当前本地视频随机选择起点，导出指定时长的 MP4；duration_ms 为片段长度（毫秒），可选 output_dir 为输出目录；成功时返回绝对文件路径。", QJsonObject{{"type", "object"}, {"properties", QJsonObject{{"duration_ms", QJsonObject{{"type", "integer"}, {"minimum", 1}, {"description", "片段长度，毫秒；3 秒为 3000"}}}, {"output_dir", QJsonObject{{"type", "string"}}}}}, {"required", QJsonArray{"duration_ms"}}}, [](const QJsonObject&) { return QJsonObject{{"success", false}, {"error", "异步工具须经 MainWindow 调用。"}}; }});
-    for (const QString& name : {QString("transcribe_subtitle"), QString("summarize_video"), QString("semantic_search"), QString("smart_edit"), QString("export_clip")}) {
-        const QString description = name == "export_clip"
-            ? "导出已有智能剪辑建议；必须先调用 smart_edit 生成建议。不能用于随机导出。"
-            : QString("AVPlayer 媒体工具：%1").arg(name);
-        m_agentTools.Register({name, description, QJsonObject{{"type", "object"}}, [](const QJsonObject&) { return QJsonObject{{"success", false}, {"error", "异步工具须经 MainWindow 调用。"}}; }});
-    }
+    m_agentTools.Register({"export_clip", "导出已有智能剪辑建议；需要 output_dir 目录，不能用于随机导出。",
+        QJsonObject{{"type", "object"}, {"properties", QJsonObject{{"output_dir", QJsonObject{{"type", "string"}}}}},
+                    {"required", QJsonArray{"output_dir"}}},
+        [](const QJsonObject&) { return QJsonObject{{"success", false}, {"error", "异步工具须经 MainWindow 调用。"}}; }});
     connect(&m_agentClipExporter, &av::agent::ClipExportService::completed, this, [this](const QJsonObject& result) {
         if (m_agentClipRequestId.isEmpty()) return;
         m_agentBridge.SendToolResult(m_agentClipRequestId, m_agentClipSessionId, "export_random_clip", result);
@@ -558,6 +601,12 @@ void MainWindow::setupAgentRuntime() {
         m_agentClipRequestId.clear();
         m_agentClipSessionId.clear();
     });
+    connect(&m_audioExtraction, &av::agent::AudioExtractionService::completed, this, [this](const QJsonObject& result) {
+        if (m_audioExtractionRequestId.isEmpty()) return;
+        m_agentBridge.SendToolResult(m_audioExtractionRequestId, m_audioExtractionSessionId, "extract_audio", result);
+        m_audioExtractionRequestId.clear();
+        m_audioExtractionSessionId.clear();
+    });
     connect(&m_agentBridge, &av::agent::AgentBridge::runtimeStarted, this, [this] {
         m_agentPanel->SetRuntimeStatus("Runtime 已连接", true);
         m_agentBridge.SendToolCatalog(m_agentTools.Definitions());
@@ -566,29 +615,66 @@ void MainWindow::setupAgentRuntime() {
     connect(&m_agentBridge, &av::agent::AgentBridge::protocolError, this, [this](const QString& error) {
         m_agentPanel->SetRuntimeStatus(error, false);
         m_agentPanel->SetAgentOutput(error);
+        m_aiAssistantService.SetConfiguration(false, false, error);
+        m_aiAssistantPanel->SetConfiguration(false, false, error);
     });
     connect(&m_aiAssistantService, &av::ai::AIAssistantService::taskFinished, this, [this](const QString& task, const QString& result) {
         if (m_agentPendingRequestId.isEmpty()) return;
-        const QHash<QString, QString> names{{"字幕转写", "transcribe_subtitle"}, {"视频摘要", "summarize_video"}, {"语义搜索", "semantic_search"}, {"智能剪辑", "smart_edit"}, {"智能剪辑导出", "export_clip"}};
+        const QHash<QString, QString> names{{"智能剪辑导出", "export_clip"}};
         if (names.value(task) != m_agentPendingTool) return;
         m_agentBridge.SendToolResult(m_agentPendingRequestId, m_agentPendingSessionId, m_agentPendingTool, QJsonObject{{"success", true}, {"result", result}});
         m_agentPendingRequestId.clear(); m_agentPendingSessionId.clear(); m_agentPendingTool.clear();
     });
     connect(&m_aiAssistantService, &av::ai::AIAssistantService::taskFailed, this, [this](const QString& task, const QString& error) {
-        Q_UNUSED(task);
-        if (m_agentPendingRequestId.isEmpty()) return;
+        if (m_agentPendingRequestId.isEmpty() || task != "智能剪辑导出") return;
         m_agentBridge.SendToolResult(m_agentPendingRequestId, m_agentPendingSessionId, m_agentPendingTool, QJsonObject{{"success", false}, {"error", error}});
         m_agentPendingRequestId.clear(); m_agentPendingSessionId.clear(); m_agentPendingTool.clear();
     });
+    m_agentBridge.Start();
 }
 
 void MainWindow::handleAgentMessage(const av::agent::AgentMessage& message) {
+    if (message.type == "ready") {
+        const bool model = message.payload.value("model_configured").toBool();
+        const bool speech = message.payload.value("speech_configured").toBool();
+        const QString status = message.payload.value("config_status").toString();
+        m_aiAssistantService.SetConfiguration(model, speech, status);
+        m_aiAssistantPanel->SetConfiguration(model, speech, status);
+        return;
+    }
+    if (message.type == "task_result") {
+        const QString task = message.payload.value("task").toString();
+        const QHash<QString, QString> names{{"transcribe_subtitle", "字幕转写"}, {"summarize_video", "视频摘要"},
+                                            {"semantic_search", "语义搜索"}, {"smart_edit", "智能剪辑"}};
+        if (message.payload.value("success").toBool())
+            emit m_aiAssistantService.taskFinished(names.value(task, task), message.payload.value("result").toString());
+        else
+            emit m_aiAssistantService.taskFailed(names.value(task, task), message.payload.value("error").toString());
+        return;
+    }
     if (message.type == "plan") { m_agentPanel->SetPlan(message.payload.value("steps").toArray()); return; }
     if (message.type == "status") { m_agentPanel->SetRuntimeStatus(message.payload.value("status").toString(), true); return; }
     if (message.type == "final") { m_agentPanel->SetAgentOutput(message.payload.value("text").toString()); return; }
     if (message.type == "error") { m_agentPanel->SetRuntimeStatus(message.payload.value("error").toString(), false); return; }
     if (message.type != "tool_call") return;
     const QString tool = message.tool;
+    if (tool == "extract_audio") {
+        if (!m_audioExtractionRequestId.isEmpty()) {
+            m_agentBridge.SendToolResult(message.requestId, message.sessionId, tool,
+                                         {{"success", false}, {"error", "已有音轨正在提取。"}});
+            return;
+        }
+        QString error;
+        const QString source = message.arguments.value("source_path").toString();
+        if (source != m_currentFilePath || !m_audioExtraction.Start(source, &error)) {
+            m_agentBridge.SendToolResult(message.requestId, message.sessionId, tool,
+                                         {{"success", false}, {"error", error.isEmpty() ? QString("媒体已切换。") : error}});
+            return;
+        }
+        m_audioExtractionRequestId = message.requestId;
+        m_audioExtractionSessionId = message.sessionId;
+        return;
+    }
     if (tool == "export_random_clip") {
         if (!m_agentClipRequestId.isEmpty()) {
             m_agentBridge.SendToolResult(message.requestId, message.sessionId, tool,
@@ -613,10 +699,6 @@ void MainWindow::handleAgentMessage(const av::agent::AgentMessage& message) {
         m_agentPanel->SetRuntimeStatus("正在导出随机片段…", true);
         return;
     }
-    if (tool == "transcribe_subtitle") { m_agentPendingTool = tool; m_agentPendingRequestId = message.requestId; m_agentPendingSessionId = message.sessionId; m_aiAssistantService.RequestTranscription(); return; }
-    if (tool == "summarize_video") { m_agentPendingTool = tool; m_agentPendingRequestId = message.requestId; m_agentPendingSessionId = message.sessionId; m_aiAssistantService.RequestSummary(); return; }
-    if (tool == "semantic_search") { m_agentPendingTool = tool; m_agentPendingRequestId = message.requestId; m_agentPendingSessionId = message.sessionId; m_aiAssistantService.RequestSemanticSearch(message.arguments.value("query").toString()); return; }
-    if (tool == "smart_edit") { m_agentPendingTool = tool; m_agentPendingRequestId = message.requestId; m_agentPendingSessionId = message.sessionId; m_aiAssistantService.RequestEditPlan(message.arguments.value("instruction").toString()); return; }
     if (tool == "export_clip") { m_agentPendingTool = tool; m_agentPendingRequestId = message.requestId; m_agentPendingSessionId = message.sessionId; m_aiAssistantService.ExportEditPlan(message.arguments.value("output_dir").toString()); return; }
     const QJsonObject result = m_agentTools.Dispatch(tool, message.arguments);
     m_agentBridge.SendToolResult(message.requestId, message.sessionId, tool, result);

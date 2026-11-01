@@ -1,33 +1,45 @@
-# AVPlayer Agent Runtime
+# AVPlayer Python Runtime
 
-`agent/` is the Python orchestration boundary. It communicates with the Qt/C++
-client through JSON Lines on stdin/stdout and uses protocol version
-`avplayer.agent.v1`.
+The Qt/C++ application owns media state, playback, screenshot, subtitle storage,
+audio extraction, and clip export. It sends goals or AI sidebar tasks to this
+local Python process. All requests to Ark chat models and Doubao speech APIs
+are made here; C++ does not hold a model networking client.
 
-## Message Types
+Install Python dependencies in the project virtual environment:
 
-- `goal`: user intent sent from Qt to Python.
-- `status`: lifecycle updates from Python to Qt.
-- `plan`: planned steps from Python to Qt.
-- `tool_call`: a requested C++ tool execution.
-- `tool_result`: the result of a C++ tool execution.
-- `error`: protocol or task error.
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r agent/requirements.txt
+```
 
-`main.py` now calls the Ark Chat API through `ark_client.py`, requires the model
-to return strict JSON commands, and continues the loop after each `tool_result`.
-FFmpeg, OpenGL and Qt-owned operations remain C++ tools.
+`AgentBridge` prefers `.venv/bin/python` if present. `config/secret_key.yaml`
+remains the only credential source and is read by `runtime.py`.
 
-The current C++ catalog contains:
+## Execution
 
-- `get_media_context`
-- `player_control`
-- `capture_screenshot`
-- `transcribe_subtitle`
-- `summarize_video`
-- `semantic_search`
-- `smart_edit`
-- `export_clip`
-- `export_random_clip` (directly exports a randomly located clip of `duration_ms`)
+`main.py` reads `avplayer.agent.v1` JSON Lines on stdin. `runtime.py` uses
+LangChain's `ChatOpenAI` adapter with the configured Ark endpoint. A LangGraph
+`StateGraph` runs the goal loop: model -> tool requests -> model -> final answer.
+The graph runs in a worker thread so the stdin thread can receive asynchronous
+C++ `tool_result` messages. A separate `task` message runs AI sidebar actions.
 
-The first three return synchronously. The media analysis tools start the existing
-`AIAssistantService` task and send the result back after its Qt signal completes.
+The Python runtime performs subtitle summarization, semantic search, edit-plan
+generation, and speech API requests. For transcription it first requests the
+C++ `extract_audio` tool, reads and deletes the temporary MP3, sends audio to
+the Doubao speech API, then requests C++ `save_transcript` to write the SRT.
+It never directly accesses Qt objects or executes FFmpeg.
+
+Messages use `request_id` to match each `tool_call` to its `tool_result`.
+The current runtime accepts one active goal or AI task at a time and limits
+an Agent goal to eight tool calls. It does not yet persist graph state across
+process restarts.
+
+## C++ tool catalog
+
+- `get_media_context`, `get_transcript`, `player_control`, `capture_screenshot`
+- `extract_audio`, `save_transcript`, `set_edit_plan`
+- `export_clip`, `export_random_clip`
+
+`agent/tools/` and `agent/schemas/` are reserved for future shared tool
+adapters and versioned protocol schemas; they are not independent execution
+backends today.

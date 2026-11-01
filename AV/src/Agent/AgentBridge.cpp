@@ -46,6 +46,11 @@ void AgentBridge::SubmitGoal(const QString& goal, const QString& sessionId) {
     Send({"goal", QUuid::createUuid().toString(QUuid::WithoutBraces), sessionId, {}, {}, {{"goal", goal}}});
 }
 
+void AgentBridge::SubmitTask(const QString& task, const QJsonObject& arguments, const QString& sessionId) {
+    Send({"task", QUuid::createUuid().toString(QUuid::WithoutBraces), sessionId, {}, arguments,
+          {{"task", task}}});
+}
+
 void AgentBridge::SendToolCatalog(const QJsonArray& tools) {
     Send({"tool_catalog", QUuid::createUuid().toString(QUuid::WithoutBraces), {}, {}, {}, {{"tools", tools}}});
 }

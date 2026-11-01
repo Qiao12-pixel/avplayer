@@ -20,6 +20,9 @@ out/
 
 # Conan 缓存
 .conan/
+.venv/
+__pycache__/
+*.pyc
 
 # 系统垃圾文件
 .DS_Store

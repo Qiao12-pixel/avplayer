@@ -1,4 +1,7 @@
 langchain>=1.0,<2.0
 langgraph>=1.0,<2.0
+langchain-ollama>=1.0,<2.0
 langchain-openai>=1.0,<2.0
 PyYAML>=6.0
+faster-whisper>=1.1,<2.0
+av>=14,<19

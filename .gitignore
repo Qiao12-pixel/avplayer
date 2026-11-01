@@ -28,7 +28,13 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# 配置目录
-config/
-config/secret_key.yaml
+# 本地凭据与生成的字幕
+config/*
+!config/secret_key.example.yaml
+resource/*.ai.srt
 resource/
+!resource/
+resource/ollama/*
+!resource/ollama/.gitkeep
+resource/whisper-small/*
+!resource/whisper-small/.gitkeep

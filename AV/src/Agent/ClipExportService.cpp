@@ -50,10 +50,11 @@ bool ClipExportService::StartRandomClip(const QString& sourcePath, qint64 source
         return fail("视频时长不足，无法导出指定长度的片段。");
 
     QString directory = outputDir.trimmed();
-    if (directory.isEmpty()) {
+    if (directory.isEmpty() || !QDir::isAbsolutePath(directory)) {
         const QString movies = QStandardPaths::writableLocation(QStandardPaths::MoviesLocation);
         directory = QDir(movies.isEmpty() ? QDir::homePath() : movies).filePath("AVPlayer");
     }
+    directory = QDir(directory).absolutePath();
     if (!QDir().mkpath(directory)) return fail("无法创建导出目录：" + directory);
     const qint64 lastStart = sourceDurationMs - clipDurationMs;
     m_startMs = lastStart == 0 ? 0 : static_cast<qint64>(

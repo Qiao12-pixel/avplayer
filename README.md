@@ -30,7 +30,7 @@ Agent 编排采用 Python Runtime，播放器能力由 C++ 工具执行，双方
 | 解复用、解码、编码与封装 | FFmpeg |
 | 视频渲染 | OpenGL、GLSL、`QOpenGLWidget` |
 | 人脸关键点与贴纸定位 | OpenCV LBF |
-| AI 助手与 Agent | 豆包语音 API、火山方舟文本模型、Python 3 Runtime |
+| AI 助手与 Agent | Python 3 Runtime；本地 Ollama/Qwen3 + Whisper，或豆包语音 API + 火山方舟文本模型 |
 | 构建与依赖 | CMake、Conan |
 
 ## 🚀 快速开始
@@ -40,7 +40,7 @@ Agent 编排采用 Python Runtime，播放器能力由 C++ 工具执行，双方
 -   当前开发构建环境：macOS、Qt 6（各模块版本一致）；其他平台需自行验证依赖和构建配置
 -   构建工具：CMake 3.23+、Conan 2.x、C++17 编译器
 -   核心依赖：FFmpeg、包含 `face` 模块的 OpenCV、Qt 6 Widgets / Multimedia / OpenGL
--   AI/Agent 运行依赖：Python 3，以及可在 `PATH` 中调用的 `ffmpeg` 命令；在线能力需要配置豆包 API 密钥
+-   AI/Agent 运行依赖：Python 3、`ffmpeg` 命令；本地模式需要 Ollama 与模型文件，豆包模式需要 API 密钥
 
 
 -   **克隆项目**  
@@ -72,10 +72,21 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r agent/requirements.txt
 ```
 
-客户端会优先启动 `.venv/bin/python`；密钥由 Python Runtime 从 `config/secret_key.yaml` 读取。
+客户端会优先启动 `.venv/bin/python`。AI 助手和 Agent 工作台的“模型方式”会同步切换，并记住上次选择。本地模式读取 `resource/local-model.yaml`；豆包模式由 Python Runtime 读取 `config/secret_key.yaml`。模型文件需先准备好，安装方式见[AI 助手模型方式](#ai-助手模型方式)。
+
+在项目根目录运行回归测试：
+
+```sh
+PYTHONPATH=agent .venv/bin/python -m unittest discover -s agent/tests -v
+```
+
 ## 📁 项目结构与数据流
 
 以下目录树按实际源码职责整理；`resource/` 和 `config/secret_key.yaml` 属于本地资源与配置，构建产物不在树中。
+
+项目架构图、播放流水线图、Agent 时序图和 AI/录制数据流图已整理为可编辑的多页面 Draw.io 文件：[AVPlayer-architecture.drawio](docs/diagrams/AVPlayer-architecture.drawio)。
+
+客户端品牌资源：[avplayer-logo.svg](resource/avplayer-logo.svg)（可编辑源稿）和 [avplayer-logo.png](resource/avplayer-logo.png)（运行时应用图标）。
 
 ```text
 AVPlayer/
@@ -104,15 +115,22 @@ AVPlayer/
 │       └── agent/               # Agent 工作台侧栏界面
 ├── agent/
 │   ├── main.py                  # Python Runtime 入口、stdin/stdout 循环
-│   ├── runtime.py               # LangGraph 工作流、LangChain 模型与语音 API
+│   ├── runtime.py               # LangGraph 工作流、本地/豆包双模型与转写
+│   ├── ark_client.py            # 豆包方舟 LangChain 模型适配
 │   ├── protocol.py              # JSON Lines 消息格式
 │   ├── requirements.txt         # Python Agent 依赖
+│   ├── tests/                   # Runtime 模式与工具往返测试
 │   ├── tools/                   # 工具扩展说明，当前无独立 Python 工具实现
 │   └── schemas/                 # 协议/参数扩展说明，当前无独立 schema 文件
 ├── config/
 │   ├── secret_key.example.yaml  # API 配置样例
 │   └── secret_key.yaml          # 本地密钥，需自行创建且不应提交
 ├── resource/                    # 本地示例媒体和贴纸素材
+│   ├── local-model.yaml         # 本地 Qwen3 / Whisper 配置
+│   ├── ollama/                  # Ollama 模型文件（下载后产生）
+│   └── whisper-small/           # Whisper 模型文件（下载后产生）
+├── scripts/
+│   └── download_local_models.sh # 下载本地模型与 Python 依赖
 ├── CMakeLists.txt               # C++/Qt 目标及依赖配置
 ├── conanfile.txt                # Conan 依赖声明
 └── README.md
@@ -172,7 +190,7 @@ flowchart LR
 flowchart LR
     Goal[AgentPanel 目标] --> Bridge[AgentBridge / QProcess]
     Bridge <-->|JSON Lines| Runtime[agent/main.py + runtime.py]
-    Runtime <-->|文本请求| Ark[方舟模型]
+    Runtime <-->|文本请求| Model[本地 Ollama 或方舟模型]
     Runtime -->|tool_call| Bridge
     Bridge -->|C++ 分发| Tools[播放器工具 / AIAssistantService / ClipExportService]
     Tools -->|tool_result| Bridge
@@ -181,30 +199,33 @@ flowchart LR
     Bridge --> UI[AgentPanel 输出]
 ```
 
-## AI 助手侧栏通过 
-`AIAssistantService` 向 Python Runtime 提交任务：C++ 用 FFmpeg 提取音轨 → Python 调豆包语音 API → C++ 保存 `.ai.srt` 并在播放器同步显示。摘要、语义搜索和智能剪辑由 Python 读取 C++ 返回的字幕文本，在 Python 侧调用方舟文本模型；剪辑计划由 C++ 校验并保存。
-## Agent 侧栏
+### AI 助手侧栏
+
+`AIAssistantService` 向 Python Runtime 提交任务：C++ 用 FFmpeg 提取音轨 → Python 按所选模式运行本地 Whisper 或豆包语音 API → C++ 保存 `.ai.srt` 并在播放器同步显示。摘要、语义搜索和智能剪辑由 Python 读取 C++ 返回的字幕文本，并调用本地 Ollama/Qwen3 或方舟文本模型；剪辑计划由 C++ 校验并保存。
+
+### Agent 侧栏
+
 将自然语言目标交给 LangGraph；模型通过 LangChain 在 C++ 工具目录中选择操作，Qt 执行后回传结果。随机片段导出由 `ClipExportService` 直接对当前本地视频调用 FFmpeg，不依赖字幕。C++ 不直接向大模型或语音 API 发起网络请求。
 
 | Agent 工具 | 执行方式 | 前置条件 / 结果 |
 | --- | --- | --- |
 | `get_media_context`、`player_control` | C++ 同步 | 读取媒体状态，或对已加载媒体执行播放控制 |
 | `capture_screenshot` | C++ 同步 | 需要已呈现画面；输出 PNG |
-| `transcribe_subtitle` | `AIAssistantService` 异步 | 本地媒体、语音 API；生成 `.ai.srt` |
-| `summarize_video`、`semantic_search` | `AIAssistantService` 异步 | 已加载字幕；搜索还需要查询文本 |
-| `smart_edit`、`export_clip` | `AIAssistantService` 异步 | 带时间戳的字幕与本地媒体；先生成建议，再指定目录导出 MP4 |
-| `export_random_clip` | `ClipExportService` 异步 | 本地媒体与 `duration_ms`；直接输出随机起点的 MP4 |
+| `transcribe_subtitle` | Python 调用 C++ 音轨工具，再运行所选语音模型 | 本地媒体；生成 `.ai.srt` |
+| `summarize_video`、`semantic_search` | Python 文本模型，C++ 提供字幕 | 已加载字幕；搜索还需要查询文本 |
+| `smart_edit`、`export_clip` | Python 生成计划，C++ 校验并导出 | 带时间戳的字幕与本地媒体；先生成建议，再指定目录导出 MP4 |
+| `export_random_clip` | `ClipExportService` 异步 | 本地媒体与 `duration_ms`；未指定绝对输出目录时保存到系统“影片/AVPlayer”，并返回绝对 MP4 路径 |
 
-两进程通过 `avplayer.agent.v1` 协议传输 `goal`、`task`、`tool_catalog`、`tool_call`、`tool_result`、`task_result`、`status`、`final` 等消息，`request_id` 关联调用和结果。Agent 使用 LangChain 原生工具调用与 LangGraph 的模型/工具循环；当前图在本地工作线程运行，可等待异步 C++ 工具结果，但尚未接入持久化 checkpointer。Agent 面板中的“执行计划”仍是预置展示。摘要、语义搜索与智能剪辑只分析字幕，尚无视频帧视觉理解或向量索引；`agent/tools/` 与 `agent/schemas/` 目前是扩展预留目录。
+两进程通过 `avplayer.agent.v1` 协议传输 `goal`、`task`、`provider`、`provider_status`、`tool_catalog`、`tool_call`、`tool_result`、`task_result`、`status`、`final` 等消息，`request_id` 关联调用和结果。Agent 使用 LangChain 原生工具调用与 LangGraph 的模型/工具循环；当前图在本地工作线程运行，可等待异步 C++ 工具结果，但尚未接入持久化 checkpointer。Agent 面板按实际工具调用动态展示执行步骤。摘要、语义搜索与智能剪辑只分析字幕，尚无视频帧视觉理解或向量索引；`agent/tools/` 与 `agent/schemas/` 目前是扩展预留目录。
 
 ### Agent 后续阶段
 
-当前已接入 LangChain 模型适配与 LangGraph 基础模型/工具循环，保持 **Qt/C++ 执行媒体操作、Python 本地进程负责模型通信和编排**。后续扩展状态恢复、真实计划节点和 Skill。参考 [LangChain Agents](https://docs.langchain.com/oss/python/langchain/agents) 与 [LangGraph 概览](https://docs.langchain.com/oss/python/langgraph/overview)。
+当前已接入 LangChain 模型适配与 LangGraph 基础模型/工具循环，支持本地模型与豆包 API 两条路径；保持 **Qt/C++ 执行媒体操作、Python 本地进程负责模型通信和编排**。后续扩展状态恢复、真实计划节点和 Skill。参考 [LangChain Agents](https://docs.langchain.com/oss/python/langchain/agents) 与 [LangGraph 概览](https://docs.langchain.com/oss/python/langgraph/overview)。
 
 1. **先稳定协议**：为 `goal` / `tool_call` / `tool_result` 增加结构校验、超时、取消和请求关联测试；保持 `AgentBridge` 与 Qt 工具接口不变。Python 工具适配器负责发出 JSON Lines 请求并等待对应 `request_id` 的结果。
 2. **扩展 LangGraph 工作流**：在现有模型/工具循环上增加“读取媒体上下文 → 判断是否需要字幕 → 必要时转写 → 规划/选择工具 → 等待 C++ 执行结果 → 校验输出 → 汇总”等显式节点；对文件覆写等高影响动作增加用户确认节点。
-4. **增加恢复与可观测性**：将 `session_id` 映射到图的 `thread_id`，先引入本地 checkpointer，再处理程序重启后的恢复、取消、超时和失败重试；Agent 面板展示真实节点进度与工具状态，而不是预置计划。LangGraph 的持久化机制可保存线程内状态，参见[持久化说明](https://docs.langchain.com/oss/python/langgraph/persistence)。
-5. **最后抽取 Skills**：把“转写后摘要”“按字幕搜索并导出片段”等经过验证的组合流程做成可发现、可配置的本地 Skill；Skill 只编排现有工具，不直接操纵播放器内部对象。验收时覆盖无音轨、无字幕、切换媒体、工具失败、重复提交和导出后文件校验。
+3. **增加恢复与可观测性**：将 `session_id` 映射到图的 `thread_id`，先引入本地 checkpointer，再处理程序重启后的恢复、取消、超时和失败重试；Agent 面板展示真实节点进度与工具状态，而不是预置计划。LangGraph 的持久化机制可保存线程内状态，参见[持久化说明](https://docs.langchain.com/oss/python/langgraph/persistence)。
+4. **最后抽取 Skills**：把“转写后摘要”“按字幕搜索并导出片段”等经过验证的组合流程做成可发现、可配置的本地 Skill；Skill 只编排现有工具，不直接操纵播放器内部对象。验收时覆盖无音轨、无字幕、切换媒体、工具失败、重复提交和导出后文件校验。
 
 上述协议加固、显式节点、持久化与 Skills 仍是**后续计划**；基础 LangChain/LangGraph 集成已位于 `agent/runtime.py`。
 
@@ -256,11 +277,23 @@ flowchart LR
 
 
 
-## AI 助手（本地客户端 + 豆包 API）
+## AI 助手模型方式
 
-侧栏支持字幕转写、视频摘要、语义搜索和智能剪辑。视频文件保留在本地；C++ 仅用本机 `ffmpeg` 抽取单声道 MP3，Python Runtime 再将音频发送至豆包语音 API。摘要、搜索和剪辑也由 Python 将字幕文本发送至火山方舟 Chat API；C++ 不直接承担大模型或语音 API 通信。请确认媒体内容允许上传至这些服务。
+AI 助手和 Agent 工作台支持“模型方式”切换：本地模型使用 Ollama/Qwen3 和 faster-whisper；豆包 API 使用方舟文本模型和豆包语音服务。两条路径的模型通信都由 Python Runtime 承担，C++ 只负责 FFmpeg 音轨提取、字幕保存、播放和导出等工具。**本地模式只连接本机 Ollama 服务；豆包模式会向服务端发送任务文本和工具结果，语音转写会上传音频，摘要/搜索/剪辑会上传字幕内容。**
 
-在项目的 `config/secret_key.yaml` 中填写 API 配置。可复制 `config/secret_key.example.yaml` 的字段结构：
+**本地模型：**在 `resource/local-model.yaml` 配置模型名称和目录；运行 `bash scripts/download_local_models.sh` 可下载 Qwen3:4b 和 Whisper small 到 `resource/`。首次下载需要网络，完成后可离线推理。脚本在 Ollama Registry 不可达时，会从 Qwen 官方 GGUF 仓库下载并校验 SHA-256，再导入本地 Ollama。若两种下载方式都失败，程序会显示“本地模型待配置”，豆包模式仍可使用。
+
+模型权重位于 `resource/ollama/` 与 `resource/whisper-small/`，已被 `.gitignore` 排除；`resource/local-model.yaml` 是可随仓库分发的配置。应用会检查 Qwen 模型是否出现在本地 Ollama 列表，以及 Whisper 快照是否同时包含 `config.json` 和 `model.bin`。缺失时只禁用对应能力并显示原因。
+
+```yaml
+provider: ollama
+model: qwen3:4b
+host: http://127.0.0.1:11435
+models_dir: resource/ollama
+whisper_model_path: resource/whisper-small
+```
+
+**豆包 API：**在项目的 `config/secret_key.yaml` 中填写 API 配置，可复制 `config/secret_key.example.yaml` 的字段结构：
 
 ```yaml
 doubao_api_key: "你的火山方舟 API Key"
@@ -271,8 +304,20 @@ doubao_speech_api_key: "你的豆包语音新版控制台 API Key"
 
 语音密钥需开通 `volc.bigasr.auc_turbo`。Python Runtime 从项目根目录的 `config/secret_key.yaml` 加载配置；修改后请重启播放器。缺失字段会在 AI 侧栏显示为配置未完成，不显示密钥值。该文件被 `.gitignore` 忽略，请勿提交真实密钥。
 
+AI 助手和 Agent 工作台的模式选择会同步，且通过 Qt `QSettings` 记住上次选择。任务执行期间不能切换；如果此时尝试切换，界面会回到正在使用的模式。两种方式都由 Python 调用模型，C++ 仅通过 JSON Lines 接收工具请求并返回执行结果。
+
 `doubao_api_key` 是火山方舟的模型调用密钥；`doubao_speech_api_key` 必须从[豆包语音控制台的 API Key 管理](https://console.volcengine.com/speech/new/setting/apikeys?projectName=default)获取，二者不能直接共用。请在同一语音项目下开通录音文件识别极速版。转写返回 `HTTP 401 / 45000010 Invalid X-Api-Key` 时，先核对语音密钥所属产品和项目。
 
-视频摘要、语义搜索与智能剪辑都通过方舟 Chat API 调用文本模型。已验证 `doubao-seed-2-0-lite-260428` 可用于本项目；Seedream 属于图片生成模型，不能用于这些按钮。播放器会自动加载视频旁的 `.ai.srt` 或 `.srt` 时间轴字幕并叠加显示；AI 侧栏可切换字幕显示。
+选择豆包模式时，视频摘要、语义搜索与智能剪辑通过方舟 Chat API 调用文本模型；Seedream 属于图片生成模型，不能用于这些文本任务。播放器会自动加载视频旁的 `.ai.srt` 或 `.srt` 时间轴字幕并叠加显示；AI 侧栏可切换字幕显示。
 
 本地媒体需能由 `ffmpeg` 读取，并且 `ffmpeg` 在 `PATH` 中。点击“字幕转写”后，软件会在视频旁保存同名 `.ai.srt` 文件。已有同名 `.ai.srt`、`.srt` 或 `.txt` 文件会自动加载；智能剪辑需要含时间戳的 `.srt`。生成剪辑建议后，点击“导出建议片段”并选择目录，各时间段会重新编码为独立的 MP4 文件。当前转写音频上限 20 MB，字幕分析上限 2 万字；网络流不支持直接转写和导出。API 密钥只从本地配置文件读取，不写入日志或其他项目文件。
+
+### 常见问题
+
+| 现象 | 检查项 |
+| --- | --- |
+| 本地文本按钮不可用 | 确认 `ollama` 可在 `PATH` 中运行，且 `qwen3:4b` 已导入 `resource/ollama/`；可重跑 `bash scripts/download_local_models.sh` |
+| 本地字幕转写不可用 | 检查 `resource/whisper-small/` 的快照目录中是否同时有 `config.json` 和 `model.bin` |
+| 豆包模式提示配置不完整 | 核对 `config/secret_key.yaml` 的文本模型与语音密钥字段，修改配置后重启应用 |
+| 模式切换后自动回退 | 等待当前 AI/Agent 任务结束，再重新选择模型方式 |
+| 本地 Agent 报 `properties must be an object` | 更新并重新构建客户端；工具参数必须是包含对象形式 `properties` 的 JSON schema，Python Runtime 会补齐空参数工具的 schema |

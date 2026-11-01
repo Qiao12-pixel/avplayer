@@ -23,6 +23,9 @@ AgentBridge::~AgentBridge() { Stop(); }
 void AgentBridge::SetPythonProgram(const QString& program) { m_pythonProgram = program.trimmed(); }
 void AgentBridge::SetRuntimeScript(const QString& script) { m_runtimeScript = script; }
 void AgentBridge::SetWorkingDirectory(const QString& directory) { m_workingDirectory = directory; }
+void AgentBridge::SetDefaultProvider(const QString& provider) {
+    m_defaultProvider = provider == "cloud" ? "cloud" : "local";
+}
 
 bool AgentBridge::Start() {
     if (IsRunning()) return true;
@@ -31,15 +34,21 @@ bool AgentBridge::Start() {
         return false;
     }
     if (!m_workingDirectory.isEmpty()) m_process.setWorkingDirectory(m_workingDirectory);
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert("AVPLAYER_AI_PROVIDER", m_defaultProvider);
+    m_process.setProcessEnvironment(environment);
     m_process.start(m_pythonProgram, {m_runtimeScript});
     return m_process.waitForStarted(1500);
 }
 
 void AgentBridge::Stop() {
     if (!IsRunning()) return;
+    Send({"shutdown", QUuid::createUuid().toString(QUuid::WithoutBraces), {}, {}, {}, {}});
     m_process.closeWriteChannel();
-    m_process.terminate();
-    if (!m_process.waitForFinished(1000)) m_process.kill();
+    if (!m_process.waitForFinished(4000)) {
+        m_process.terminate();
+        if (!m_process.waitForFinished(1000)) m_process.kill();
+    }
 }
 
 void AgentBridge::SubmitGoal(const QString& goal, const QString& sessionId) {
@@ -49,6 +58,11 @@ void AgentBridge::SubmitGoal(const QString& goal, const QString& sessionId) {
 void AgentBridge::SubmitTask(const QString& task, const QJsonObject& arguments, const QString& sessionId) {
     Send({"task", QUuid::createUuid().toString(QUuid::WithoutBraces), sessionId, {}, arguments,
           {{"task", task}}});
+}
+
+void AgentBridge::SetProvider(const QString& provider) {
+    Send({"provider", QUuid::createUuid().toString(QUuid::WithoutBraces), "runtime", {}, {},
+          {{"provider", provider}}});
 }
 
 void AgentBridge::SendToolCatalog(const QJsonArray& tools) {

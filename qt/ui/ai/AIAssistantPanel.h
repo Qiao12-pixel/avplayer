@@ -6,6 +6,7 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QComboBox>
 #include <QWidget>
 /*
  * @brief 只负责 AI 侧栏布局、控件、展示状态和发出用户操作信号。
@@ -17,6 +18,7 @@ public:
     void SetMediaContext(const QString& source, bool playing, int width = 0, int height = 0);
     void SetRecording(bool recording);
     void SetConfiguration(bool chatReady, bool speechReady, const QString& status);
+    void SetProviderMode(const QString& provider);
     void SetTranscript(const QString& sourcePath);
     void SetSubtitleAvailable(bool available);
     void SetTaskStarted(const QString& name);
@@ -34,6 +36,7 @@ signals:
     void editPlanRequested(const QString& instruction);
     void exportEditPlanRequested();
     void subtitleVisibilityChanged(bool visible);
+    void providerModeChanged(const QString& provider);
 
 private:
     QLabel* m_sourceLabel{nullptr};
@@ -50,6 +53,8 @@ private:
     QCheckBox* m_subtitleToggle{nullptr};
     QLineEdit* m_promptEdit{nullptr};
     QPlainTextEdit* m_resultEdit{nullptr};
+    QComboBox* m_providerCombo{nullptr};
+    QLabel* m_providerHint{nullptr};
     QLabel* m_connectionLabel{nullptr};
     QLabel* m_statusLabel{nullptr};
     bool m_hasMedia{false};

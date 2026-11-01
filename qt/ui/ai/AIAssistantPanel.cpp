@@ -6,6 +6,7 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QScrollArea>
+#include <QSignalBlocker>
 #include <QVBoxLayout>
 
 namespace {
@@ -59,6 +60,12 @@ AIAssistantPanel::AIAssistantPanel(QWidget* parent) : QWidget(parent) {
         QPushButton:disabled { color: #8496a9; background: #172638; border-color: #2d4053; }
         QCheckBox { color: #bfd1df; spacing: 8px; font-size: 12px; }
         QCheckBox::indicator { width: 16px; height: 16px; }
+        QComboBox { color: #e8effa; background: #20364b; border: 1px solid #456079;
+                    border-radius: 7px; padding: 6px 10px; min-width: 112px; }
+        QComboBox:hover { background: #2c4c62; border-color: #70aeb4; }
+        QComboBox::drop-down { border: none; width: 20px; }
+        QComboBox QAbstractItemView { color: #e8effa; background: #172638;
+                                      selection-background-color: #176f75; }
     )");
 
     auto* root = new QVBoxLayout(this);
@@ -83,6 +90,23 @@ AIAssistantPanel::AIAssistantPanel(QWidget* parent) : QWidget(parent) {
     m_connectionLabel->setStyleSheet("background: rgba(234, 179, 8, 0.12); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.20); border-radius: 9px; padding: 5px 8px; font-size: 10px;");
     header->addWidget(m_connectionLabel, 0, Qt::AlignTop);
     root->addLayout(header);
+
+    auto* providerRow = new QHBoxLayout();
+    providerRow->addWidget(MakeSectionTitle("模型方式", this));
+    providerRow->addStretch();
+    m_providerCombo = new QComboBox(this);
+    m_providerCombo->addItem("本地模型", "local");
+    m_providerCombo->addItem("豆包 API", "cloud");
+    m_providerCombo->setToolTip("选择文本分析、字幕转写和 Agent 使用的模型方式");
+    providerRow->addWidget(m_providerCombo);
+    root->addLayout(providerRow);
+    m_providerHint = new QLabel("本地模型：音频和字幕留在本机。", this);
+    m_providerHint->setWordWrap(true);
+    m_providerHint->setStyleSheet("color: #8fa8bd; font-size: 10px;");
+    root->addWidget(m_providerHint);
+    connect(m_providerCombo, &QComboBox::currentIndexChanged, this, [this] {
+        emit providerModeChanged(m_providerCombo->currentData().toString());
+    });
 
     auto* scroll = new QScrollArea(this);
     scroll->setWidgetResizable(true);
@@ -235,15 +259,31 @@ void AIAssistantPanel::SetRecording(bool recording) {
 
 void AIAssistantPanel::SetConfiguration(bool chatReady, bool speechReady, const QString& status) {
     m_chatReady = chatReady; m_speechReady = speechReady; m_configStatus = status;
-    m_connectionLabel->setText(chatReady && speechReady ? "凭据已填写" : "配置待完成");
-    m_statusLabel->setText(chatReady && speechReady ? "豆包 API 已配置" : status);
+    const bool cloud = m_providerCombo && m_providerCombo->currentData().toString() == "cloud";
+    m_connectionLabel->setText(chatReady && speechReady ? (cloud ? "豆包 API 已配置" : "本地模型已就绪")
+                                                   : chatReady ? "文本模型已就绪" : "模型待配置");
+    m_statusLabel->setText(chatReady && speechReady ? (cloud ? "豆包 API 已配置" : "本地模型已配置") : status);
     m_statusLabel->setToolTip(status);
     RefreshTools();
+}
+
+void AIAssistantPanel::SetProviderMode(const QString& provider) {
+    if (!m_providerCombo) return;
+    const int index = m_providerCombo->findData(provider);
+    if (index >= 0 && index != m_providerCombo->currentIndex()) {
+        const QSignalBlocker blocker(m_providerCombo);
+        m_providerCombo->setCurrentIndex(index);
+    }
+    if (m_providerHint) m_providerHint->setText(provider == "cloud"
+        ? "豆包 API：文本任务发送字幕，转写时上传音频。"
+        : "本地模型：音频和字幕留在本机。");
 }
 void AIAssistantPanel::SetTranscript(const QString& sourcePath) {
     m_hasTranscript = !sourcePath.isEmpty();
     if (m_hasTranscript) m_statusLabel->setText("已加载字幕 · " + QFileInfo(sourcePath).fileName());
-    else m_statusLabel->setText(m_chatReady && m_speechReady ? "豆包 API 已配置" : m_configStatus);
+    else m_statusLabel->setText(m_chatReady && m_speechReady
+        ? (m_providerCombo->currentData().toString() == "cloud" ? "豆包 API 已配置" : "本地模型已配置")
+        : m_configStatus);
     m_statusLabel->setToolTip(m_hasTranscript ? sourcePath : m_configStatus);
     RefreshTools();
 }

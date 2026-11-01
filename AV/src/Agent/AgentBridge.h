@@ -17,11 +17,13 @@ public:
     void SetPythonProgram(const QString& program);
     void SetRuntimeScript(const QString& script);
     void SetWorkingDirectory(const QString& directory);
+    void SetDefaultProvider(const QString& provider);
     bool Start();
     void Stop();
     bool IsRunning() const { return m_process.state() != QProcess::NotRunning; }
     void SubmitGoal(const QString& goal, const QString& sessionId);
     void SubmitTask(const QString& task, const QJsonObject& arguments, const QString& sessionId);
+    void SetProvider(const QString& provider);
     void SendToolCatalog(const QJsonArray& tools);
     void SendToolResult(const QString& requestId, const QString& sessionId,
                         const QString& tool, const QJsonObject& result);
@@ -40,6 +42,7 @@ private:
     QString m_pythonProgram{"python3"};
     QString m_runtimeScript;
     QString m_workingDirectory;
+    QString m_defaultProvider{"local"};
 };
 
 }

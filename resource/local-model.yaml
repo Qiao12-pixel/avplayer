@@ -1,0 +1,6 @@
+# Local inference configuration. Model files are intentionally not committed.
+provider: ollama
+model: qwen3:4b
+host: http://127.0.0.1:11435
+models_dir: resource/ollama
+whisper_model_path: resource/whisper-small

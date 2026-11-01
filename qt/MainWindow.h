@@ -132,6 +132,7 @@ private:
     av::FileReader* m_fileReader{nullptr};
     std::unique_ptr<av::IRecordSession> m_recordSession;
     std::atomic<uint64_t> m_playbackGeneration{0};
+    QString m_aiProvider{"local"};
 };
 
 #endif //MAINWINDOW_H

@@ -1,34 +1,87 @@
-# 播放性能与同步测量
+# 当前架构基准（实测）
 
-当前播放链路在 `VideoDecoder` 中保留紧凑 YUV420P：输入本身是 YUV420P 时只复制平面；其他格式先由 FFmpeg `sws_scale` 在 CPU 上转为 YUV420P。`VideoDisplay` 将 Y、U、V 上传为三张单通道纹理，在片段着色器中完成 YUV→RGB 和滤镜合成。OpenCV 贴纸检测需要像素数据时单独在 CPU 上转为 RGBA；录制编码器直接使用 YUV420P。视频解码仍使用 FFmpeg 常规解码器，不能称为硬件解码。
+所有数字由 `scripts/bench_metrics.py` 与 `streaming_smoke_client` 现场采集，
+不引用历史文档中的旧指标。
 
-构建时需选用包含 `face` 模块的 OpenCV，并使 QtCore、QtMultimedia 等 Qt 模块版本一致。本机使用 `OpenCV_DIR=/opt/homebrew/lib/cmake/opencv5` 与 Qt 6.10.2；生成的可执行文件位于构建目录中。
+## 环境
 
-CLion 重新加载 CMake 后可直接构建 `AVPlayer`。由于本机 Homebrew 的 `qtbase` 6.11.1 与 `qtmultimedia` 6.10.2 并存，运行时请使用项目根目录的 `run_avplayer.sh`，它会把 Qt 框架和平台插件固定到 6.10.2：
+| 项 | 值 |
+| --- | --- |
+| 机器 | Apple M5，macOS 26.x（Darwin 27.0.1） |
+| 构建 | CMake `Debug`（`cmake-build-debug`），未做 Release 优化 |
+| FFmpeg / x264 | 9.0.2，`veryfast` + `zerolatency` |
+| 拓扑 | agent(50161) + media_server(50162) + gateway(50165) + 独立测量客户端，全部本机 loopback |
+| 素材 | `resource/bench-1080p60.mp4`：1920×1080/60fps，H.264 + AAC，40s（`testsrc2` + 1kHz 正弦） |
 
-```bash
-./run_avplayer.sh cmake-build-debug --benchmark resource/input.mp4 --seconds 5
+## 采样方式
+
+- **推流帧率**：`WebRtcFrameSink` 内置统计（`AVPLAYER_STREAM_STATS=1`），每 5 秒输出
+  一次 `fps` / `mbps`，统计的是真正 `sendFrame` 出去的编码帧。
+- **接收端**：`streaming_smoke_client` 作为真实 WebRTC 接收方（H.264 + Opus），
+  记录 ICE 建连耗时、首帧到达、包速率、码率与包间隔。
+- **控制面**：同一次会话内，C++ 客户端直连 gRPC 发 30 次 `Control`；Python 侧
+  通过网关 `POST /control` 发 120 次。
+- **转写**：`resource/input.mp4`（132s，含语音）走 `transcribe_subtitle` 全流程
+  （ffmpeg 抽音轨 → faster-whisper small/int8）。
+- **导出**：`export_video` 截取 40s 素材的前 20s（`-ss` + 重新编码）。
+
+## 结果
+
+| 指标 | 数值 |
+| --- | --- |
+| 服务端编码推流（1080p60 输入，含录制负载） | **59.55 / 60.00 fps** |
+| 推流码率 | 4.09 / 4.00 Mbps |
+| ICE 建连 | 69 ms |
+| 建连后首帧到达 | 12.3 ms |
+| 客户端接收 | 4.11 Mbps，1027 包/秒，音频 54 kbps |
+| 包间隔 | p50 0.01 ms，p95 12.9 ms |
+| 控制面（C++ 直连 gRPC） | p50 **0.11 ms**，p95 0.15 ms |
+| 控制面（浏览器路径：HTTP → 网关 → gRPC） | p50 **1.07 ms**，p95 1.89 ms |
+| media_server 常驻内存 | 14.6 MB（推流前后无增长） |
+| 服务端录制 | 2.08s 输出，1920×1080 H.264 + AAC |
+| 转写 132s 视频 | 6.4 s，17 条字幕（RTF 0.05） |
+| 片段导出 20s | 5.28 s（3.8× 实时） |
+
+## 本轮由测量发现并修复的两个问题
+
+### 1. 推流被调度节拍限制在 ~46 fps
+
+`MediaSession::TickLoop` 每 16 ms 调一次 `AVSynchronizer::Tick()`，而 `Tick()`
+每次最多派发一帧，理论天花板 ≈62 fps，实测 46 fps（1080p 与 720p 相同，说明
+瓶颈不在编码分辨率）。把服务端 tick 周期降到 **8 ms** 后达到 59.6–60.0 fps，
+`masterClock` 与帧 PTS 重新对齐（11.975s vs 11.983s）。
+
+### 2. 开启录制时的锁顺序反转（死锁）
+
+`StartRecording` 先拿 `m_recordMutex`，再调 `FileReader::GetVideoWidth()`
+（内部要 codec 锁）；而解码线程在持有 codec 锁时回调 `OnFileReaderNotifyVideoFrame`
+并去拿 `m_recordMutex`。两个方向相对，`record_start` 会永久阻塞。tick 提到 8ms 后
+解码线程几乎不空闲，这个潜伏 bug 变成必现。修复方式是**在取 `m_recordMutex`
+之前读取尺寸**，消除反向加锁。
+
+## 复现
+
+```sh
+# 1) 起服务（隔离端口，避免和 dev.sh 抢）
+AVPLAYER_MEDIA_SERVER_ADDRESS=0.0.0.0:50162 AVPLAYER_STREAM_STATS=1 \
+  ./cmake-build-debug/services/media/media_server &
+AVPLAYER_AGENT_PORT=50161 .venv/bin/python -m avplayer_agent &
+AVPLAYER_AGENT_SERVER=localhost:50161 AVPLAYER_MEDIA_SERVER=localhost:50162 \
+  AVPLAYER_WEB_GATEWAY_PORT=50165 .venv/bin/python -m avplayer_agent.web_gateway &
+
+# 2) 测量
+.venv/bin/python scripts/bench_metrics.py \
+  --media-server localhost:50162 --agent localhost:50161 \
+  --gateway http://127.0.0.1:50165 \
+  --clip resource/bench-1080p60.mp4 --stream-seconds 12 \
+  --transcribe --transcribe-clip resource/input.mp4 \
+  --json-out docs/bench-current.json
 ```
 
-播放器提供可重复运行的基准入口：
+## 口径说明
 
-```bash
-ffmpeg -f lavfi -i 'testsrc2=size=1920x1080:rate=60' \
-  -f lavfi -i 'sine=frequency=1000:sample_rate=44100' \
-  -t 15 -c:v libx264 -preset ultrafast -crf 24 -pix_fmt yuv420p \
-  -c:a aac -b:a 128k -y /tmp/avplayer-1080p60-h264.mp4
-
-./cmake-build-debug/apps/desktop/AVPlayer --benchmark /tmp/avplayer-1080p60-h264.mp4 --seconds 12 \
-  --sticker --record /tmp/avplayer-recorded.mp4
-```
-
-`--sticker` 和 `--record OUTPUT.mp4` 可分别省略，以比较不同负载。还可使用 `--capture FRAME.png` 保存约第 2 秒的 OpenGL 帧，检查颜色和纹理方向。运行日志以 `[PlaybackMetrics]` 开头，记录 OpenGL 渲染器、输入编码、分辨率、源帧率及每个约 10 秒窗口的结果。`swapped_fps` 只计入有新视频帧的 `QOpenGLWidget::frameSwapped` 事件；`face_detection_hits` 表示人脸框检测成功，`landmark_hits` 才表示通过有效性检查的 68 点结果。同步差值定义为 **视频帧 PTS − `QAudioSink` 推算的音频时钟**，在帧交换信号处采样，输出有符号均值、绝对值 P95 和最大值。这里的音频时钟来自 `processedUSecs()`，并未测量扬声器实际出声时刻，不能把该统计值称作物理音画延迟。
-
-2026-10-11，在 Apple M5、macOS 26.6.1、Qt 6.10.2、Debug 构建下，将仓库自带的 1280×720/24 fps H.264 样片临时缩放并补帧为 1920×1080/60 fps H.264，开启贴纸和 H.264/AAC 录制后测得：
-
-| 窗口 | `swapped_fps` | 同步差值绝对值 P95 | 人脸框命中 | 有效 68 点 |
-| --- | ---: | ---: | ---: | ---: |
-| 前约 10 秒 | 60.30 | 35.55 ms | 66 / 100 次检测 | 0 |
-| 后约 2 秒 | 58.37 | 42.74 ms | 15 / 20 次检测 | 0 |
-
-这段输入由 24 fps 样片补帧，不能代表原生 60 fps 摄制内容。有效 68 点为 0：本机 OpenCV 5.0.0 的 LBF 对此模型返回全零点；代码会拒绝这些点，改用人脸框估算贴纸位置。**当前不能声称 LBF 68 关键点跟踪已经通过实测。**导出的 MP4 已由 `ffprobe` 确认为 1920×1080 H.264 视频和 AAC 音频。上述数据支持“该条件下约 60 fps”的表述；“稳定 60 fps”和物理音画同步精度需要代表性原生素材、Release 构建及更长时间的重复测试。
+- 所有数字在 **Debug 构建**下取得，Release 预计更高，不应对外宣称 Release 数据。
+- 素材是 `testsrc2` 合成画面，纹理细节高于实拍，编码压力偏大；结论「约 60 fps」
+  针对该条件。
+- 上传吞吐（38 MB / 0.03 s）走 loopback + 页缓存，**不写入简历**，没有代表性。
+- 首帧 12.3 ms 是「ICE 建连成功 → 首个 RTP 视频包」，不含浏览器解码渲染。

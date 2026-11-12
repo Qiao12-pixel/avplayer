@@ -510,4 +510,9 @@ scripts/dev.sh
 
 # Compose 配置校验
 docker compose -f deploy/docker-compose.yml config
+
+# 当前架构基准（推流帧率/延迟/控制面/转写/导出）
+.venv/bin/python scripts/bench_metrics.py --help
 ```
+
+测量方法与实测结果见 [BENCHMARK.md](BENCHMARK.md)。

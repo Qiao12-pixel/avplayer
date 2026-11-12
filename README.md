@@ -1,8 +1,13 @@
 # 📋 项目简介
 
-AVPlayer 是一款基于 **C++17、Qt、FFmpeg 和 OpenGL** 的桌面音视频播放器。项目包含本地/网络媒体播放、音视频同步、录制、截图与视频滤镜；OpenCV 用于人脸关键点检测和动态贴纸定位。AI 助手提供字幕转写、视频摘要、字幕语义搜索和智能剪辑；Agent 工作台由 Python 服务编排，需要 UI 的工具回传桌面端执行。
+AVPlayer 是一套 **C++17 + Qt + FFmpeg + OpenGL** 的音视频播放与流媒体系统，由两个客户端和两个服务端单元组成：
 
-Agent 编排由 `services/agent` 的 Python 服务承担，桌面端与 Web 端通过 `avplayer.agent.v1` gRPC 契约访问；媒体解码与 WebRTC 推流由 `services/media` 负责。各部署单元职责见下文“项目结构与数据流”。
+- **`services/media`（C++）**：复用共享媒体核心做解复用/解码/音画同步/编码，把 H.264 + Opus 经 WebRTC 实时推给浏览器，并支持服务端录制与播放控制；
+- **`services/agent`（Python）**：媒体上传、字幕转写、摘要/语义搜索/智能剪辑、LangGraph 工具编排，可选 Redis 字幕缓存与 MySQL 元数据；
+- **`apps/desktop`（Qt）**：本地/网络媒体播放、滤镜与贴纸、录制、截图，以及 AI/Agent 侧栏；
+- **`apps/web`（Vite + TS）**：浏览器端播放，控制与 AI 经 Web 网关访问同一套 gRPC 服务。
+
+桌面端与服务端通过 `avplayer.agent.v1` gRPC 契约通信，媒体面（WebRTC）与控制面（gRPC/HTTP）分离——音视频不经过网关。各部署单元职责见下文“项目结构与数据流”。
 <img width="1440" height="932" alt="image" src="https://github.com/user-attachments/assets/77833f4a-5ed4-46df-89e2-33adb9c060b3" />
 
 
@@ -18,13 +23,14 @@ Agent 编排由 `services/agent` 的 Python 服务承担，桌面端与 Web 端�
 
 -   🎥 **音视频录制**：对当前媒体的解码帧重新编码，封装为 MP4
 -   🎨 **视频滤镜**：灰度、反相、垂直翻转及动态贴纸
--   🧠 **人脸关键点**：通过 OpenCV LBF 检测并辅助贴纸定位
+-   🧠 **人脸关键点**：OpenCV LBF 输出 68 点后做有效性校验（坐标有限、落在人脸框内、双眼间距达标），不达标时回退人脸框估算贴纸位置，避免贴纸漂移到原点
 -   📸 **画面截图**：保存播放器当前显示画面
 -   🌐 **WebRTC 拉流**：服务端解码/编码，H.264 + Opus 回传，Qt 与 Web 两端可播放
--   🧩 **Web 客户端同构**：播放、进度/seek、服务端录制、截图下载、滤镜以及 AI/Agent 面板与 Qt 布局一致
+-   🧩 **Web 客户端同构**：播放、进度/seek、服务端录制、截图下载、灰度/反相/翻转滤镜以及 AI/Agent 面板与 Qt 布局一致（动态贴纸仍只在桌面端）
 -   🤖 **AI 与 Agent**：字幕转写、文本分析、语义搜索、智能剪辑及自然语言工具编排
 -   ✂️ **按内容导出片段**：Agent 先查字幕时间轴再按 `start_ms/end_ms` 精确截取，时长由内容决定，一次可导出多段
 -   🗄️ **可选缓存与持久化**：Redis 缓存字幕、MySQL 记录媒体与任务审计；都不启动时自动退化为纯磁盘
+-   ⚡ **可复现的性能基准**：`scripts/bench_metrics.py` 一次跑完上传/推流/控制面/转写/导出；当前实测 1080p60 服务端稳定 **59.6–60.0 fps**、首帧 **12 ms**、控制面 p50 **0.11 ms**，方法与数据见 [BENCHMARK.md](BENCHMARK.md)
 
 # 🏗️ 技术栈
 
@@ -33,7 +39,9 @@ Agent 编排由 `services/agent` 的 Python 服务承担，桌面端与 Web 端�
 | 客户端 | C++17、Qt 6 Widgets / Multimedia |
 | 解复用、解码、编码与封装 | FFmpeg |
 | 视频渲染 | OpenGL、GLSL、`QOpenGLWidget` |
-| 人脸关键点与贴纸定位 | OpenCV LBF |
+| 人脸关键点与贴纸定位 | OpenCV LBF（含有效性校验与回退） |
+| 服务化与实时传输 | gRPC（`avplayer.agent.v1`）、WebRTC（libdatachannel，H.264 + Opus） |
+| Web 客户端 | Vite + TypeScript（WebRTC 接收、HTTP/WebSocket 控制） |
 | AI 助手与 Agent | `services/agent`（Python 3）；本地 Ollama/Qwen3 + Whisper，或豆包语音 API + 火山方舟文本模型 |
 | 缓存 / 持久化（可选） | Redis（字幕缓存）、MySQL（会话、媒体、任务记录） |
 | 构建与依赖 | CMake、Conan |
@@ -67,11 +75,17 @@ docker compose -f deploy/docker-compose.yml up --build
 # Web：http://localhost:8080
 ```
 
-测试：
+测试与基准：
 
 ```sh
+# 34 条 Python 单测（runtime / 缓存 / MySQL / 导出），无需 Redis/MySQL
 PYTHONPATH=services/agent .venv/bin/python -m unittest discover -s services/agent/tests -v
+
+# gRPC 上传 + 任务往返
 PYTHONPATH=services/agent .venv/bin/python tests/grpc_smoke_client.py
+
+# 当前架构基准：推流帧率/延迟/控制面/转写/导出（服务需已启动）
+.venv/bin/python scripts/bench_metrics.py --clip resource/bench-1080p60.mp4
 ```
 
 ## 📁 项目结构与数据流
@@ -105,12 +119,12 @@ AVPlayer/
 ├── services/
 │   ├── agent/                   # Python Agent 服务部署单元
 │   │   ├── pyproject.toml       # 可安装包与 console scripts
-│   │   ├── avplayer_agent/      # runtime、gRPC server、存储、网关、生成的 stub
+│   │   ├── avplayer_agent/      # runtime、gRPC server、存储、网关、缓存与数据库
 │   │   ├── tests/               # Agent 单元测试（runtime/缓存/数据库/导出）
 │   │   └── docs/                # 工具/schema 扩展说明
 │   └── media/                   # C++ 媒体服务部署单元
 │       ├── CMakeLists.txt       # 独立构建入口
-│       └── src/                 # media_server、MediaSession、WebRTC 推流
+│       └── src/                 # media_server、MediaSession、WebRTC 推流、测量客户端
 ├── libs/
 │   └── media-core/              # 桌面端与媒体服务端共享
 │       └── src/
@@ -126,11 +140,13 @@ AVPlayer/
 ├── tests/                       # 跨服务集成/冒烟脚本
 ├── config/                      # secret_key.example.yaml 与本地密钥
 ├── resource/                    # 示例媒体、贴纸、Ollama/Whisper 模型
-├── scripts/                     # dev.sh、gen_proto.sh、download_local_models.sh
-├── docs/                        # drawio 架构图、面试准备
+├── scripts/                     # dev.sh、gen_proto.sh、下载模型、bench_metrics.py
+├── docs/                        # drawio 架构图、面试准备、简历稿（本地）
 ├── CMakeLists.txt               # 根构建：proto + media-core + 两个 C++ 部署单元
 ├── conanfile.txt
 ├── STARTUP.md                   # 完整启动、配置与排障说明
+├── BENCHMARK.md                 # 当前架构的测量方法与实测数据
+├── LICENSE                      # MIT
 └── README.md
 ```
 
@@ -140,7 +156,7 @@ AVPlayer/
 | --- | --- | --- |
 | `apps/desktop` | `AVPlayer` | `libs/media-core` + `proto`；通过 gRPC 连接 `services/agent` 与 `services/media` |
 | `apps/web` | Vite/nginx | HTTP/WebSocket 到 `services/agent` 的 Web 网关 |
-| `services/agent` | `avplayer-agent`、`avplayer-web-gateway` | 独立 Python 包；读写共享存储，gRPC 到 `services/media` |
+| `services/agent` | `avplayer-agent`、`avplayer-web-gateway` | 独立 Python 包；读写共享存储；网关进程 gRPC 转发到 `services/media` |
 | `services/media` | `media_server` | `libs/media-core` + `proto`；不构建、不链接 Qt 桌面应用 |
 | `libs/media-core` | 静态库 | 仅媒体解码/同步/帧类型/录制编码，不含桌面 UI |
 | `proto` | `avplayer_proto` 静态库 | 两个 C++ 部署单元共享的 gRPC 契约 |
@@ -174,7 +190,28 @@ flowchart LR
 | `TranscriptSegment` | `services/agent` 转写或旁路 `.srt` | 字幕显示、摘要/搜索/剪辑 | 毫秒起止时间与字幕文本 |
 | Agent gRPC 消息 | 桌面端或 `services/agent` | 对端服务 | 消息类型、`request_id`、`Struct` JSON 工具参数或结果 |
 
-解复用器和音视频解码器各有工作线程及异步队列，`Listener` 回调把数据推向下一层。音视频数据以 `shared_ptr` 传递；包/帧销毁时通过释放回调归还流水线额度，限制上游继续生产。同步器的视频队列上限为 60 帧，超限时丢弃最早帧。音频样本进入 Qt 音频设备前经主线程排队调用，避免从解码线程直接操作 `QAudioSink`。
+解复用器和音视频解码器各有工作线程及异步队列，`Listener` 回调把数据推向下一层。音视频数据以 `shared_ptr` 传递；包/帧销毁时通过释放回调归还流水线额度，限制上游继续生产。同步器的视频队列上限为 60 帧，超限时丢弃最早帧。音频样本由 `AudioRender::PushSamples` 在音频回调线程直接写入 `QAudioSink` 提供的 `QIODevice`，写入过程与时钟基准之间有互斥锁保护；`QAudioSink` 对象本身在主线程创建。
+
+### 服务端推流数据流
+
+```mermaid
+flowchart LR
+    File[共享存储 original.*] --> Reader[FileReader 解复用 / 解码]
+    Reader --> Sync[AVSynchronizer 音画同步]
+    Sync --> VSink[WebRtcFrameSink]
+    Sync --> ASink[WebRtcAudioSink]
+    VSink -->|H.264 编码| RTPv[RTP 视频 / 90 kHz]
+    ASink -->|48 kHz 重采样 + Opus| RTPa[RTP 音频]
+    RTPv --> Peer[浏览器 / 测量客户端]
+    RTPa --> Peer
+    Reader --> Rec[Recorder 服务端录制]
+    Rec --> MP4[recording-*.mp4]
+```
+
+`media_server` 不监听文件上传，它和 `services/agent` 约定同一个存储根，按
+`session_id + media_id` 找到 `original.*` 后自行解码。控制指令（play / pause /
+seek / record_start / record_stop）走 gRPC `StreamingService.Control`，媒体数据
+只走 WebRTC。服务端每 8 ms 推进一次同步器 tick，单次最多派发一帧视频。
 
 ### 录制数据流
 
@@ -191,13 +228,13 @@ flowchart LR
     Muxer --> MP4[临时 MP4 → 保存文件]
 ```
 
-录制接收的是解码后的音视频帧，与播放分支并行；`RecordSession` 管理开始、停止、临时文件和最终保存。这里不是对播放器窗口进行屏幕录制，界面字幕和仅在显示阶段合成的滤镜/贴纸不会自动写入录制输出。
+录制接收的是解码后的音视频帧，与播放分支并行；`RecordSession` 管理开始、停止、临时文件和最终保存。服务端录制复用同一条解码回调，由 `record_start` / `record_stop` 触发，输出到 `storage/<session>/<media>/recording-<millis>.mp4`。这里不是对播放器窗口进行屏幕录制，界面字幕和仅在显示阶段合成的滤镜/贴纸不会自动写入录制输出。
 
 ### AI 助手与 Agent 数据流
 
 ```mermaid
 flowchart LR
-    Player[MainWindow] -->|MediaService.UploadMedia| Agent[services/agent]
+    Player[桌面 MainWindow / Web 客户端] -->|MediaService.UploadMedia| Agent[services/agent]
     Player <-->|AgentService.Converse| Agent
     Agent <-->|文本/语音请求| Model[本地 Ollama 或方舟模型]
     Agent -->|tool_call| Player
@@ -211,11 +248,12 @@ flowchart LR
 ### AI 助手侧栏
 
 桌面端在打开本地媒体后异步上传到 Agent 服务（不阻塞播放），提交
-`transcribe_subtitle` 等任务时再按需准备 `ai-sidebar` 会话的媒体。音频提取、语音识别、摘要、语义搜索和剪辑计划
+`transcribe_subtitle` 等任务时再按需准备 `ai-sidebar` 会话的媒体；Web 端在
+“上传到服务端”或首次点击“连接并播放”时上传，两条路径写入同一套存储布局。音频提取、语音识别、摘要、语义搜索和剪辑计划
 都在 `services/agent` 内完成：服务端用 ffmpeg 从共享存储中的副本提取音轨，
 本地模式运行 faster-whisper，豆包模式调用语音 API，字幕写入
 `storage/<session_id>/<media_id>/transcript.srt` 并回传任务结果。C++ 侧只保留
-播放器状态读取、播放控制和截图等必须触碰 UI 的工具。
+播放控制、截图和剪辑导出等必须触碰 UI 的工具。
 
 ### Agent 侧栏
 
@@ -223,15 +261,20 @@ flowchart LR
 选择工具，`player_control`、`capture_screenshot`、`export_clip` 回传桌面端执行，
 其余媒体工具在服务端执行。桌面端不直接向大模型或语音 API 发起网络请求。
 
-| Agent 工具 | 执行位置 | 前置条件 / 结果 |
-| --- | --- | --- |
-| `get_media_context` | `services/agent` | 读取共享存储中的媒体状态与路径 |
-| `player_control`、`capture_screenshot` | 桌面端 C++ | 需要已加载媒体/已呈现画面 |
-| `extract_audio`、`get_transcript`、`save_transcript`、`set_edit_plan` | `services/agent`（ffmpeg + 存储） | 已上传媒体；写入会话目录 |
-| `transcribe_subtitle` | `services/agent` | 本地 Whisper 或豆包语音；生成 `transcript.srt/.json` |
-| `summarize_video`、`semantic_search`、`smart_edit` | `services/agent` | 需要字幕文本；剪辑计划写入 `edit_plan.json` |
-| `export_video` | `services/agent`（ffmpeg） | 已上传媒体；`start_ms/end_ms` 精确截取，或仅 `duration_ms` 随机截取 |
-| `export_clip` | 桌面端 C++ | 复用已有剪辑建议与输出目录 |
+模型可选的工具由客户端在连接时下发（`tool_catalog`），因此两端能力并不完全相同：
+
+| 工具 | 谁可以调用 | 执行位置 | 说明 |
+| --- | --- | --- | --- |
+| `player_control`、`capture_screenshot` | 仅桌面端 | 桌面端 C++ | 需要已加载媒体 / 已呈现画面 |
+| `export_clip` | 仅桌面端 | 桌面端 C++ | 导出已有的智能剪辑建议 |
+| `get_media_context` | 仅 Web 端 | `services/agent` | 读取当前媒体的加载状态与路径 |
+| `export_video` | 仅 Web 端 | `services/agent`（ffmpeg） | `start_ms/end_ms` 精确截取，或仅 `duration_ms` 随机截取 |
+| `transcribe_subtitle` | 两端 | `services/agent` | 本地 Whisper 或豆包语音；生成 `transcript.srt/.json` |
+| `summarize_video`、`semantic_search`、`smart_edit` | 两端 | `services/agent` | 依赖字幕文本；剪辑计划写入 `edit_plan.json` |
+| `export_plan` | Web 任务 | `services/agent` | `task=export_plan`，把剪辑计划渲染成多个 MP4 |
+
+以下工具**模型不可见**（`INTERNAL_CPP_TOOLS`），只由服务端任务在内部调用：
+`get_transcript`、`extract_audio`、`save_transcript`、`set_edit_plan`。
 
 桌面端与服务端通过 `proto/agent.proto` 的 `avplayer.agent.v1` 契约通信：
 `MediaService.UploadMedia` 上传媒体，`AgentService.Converse` 双向传输
@@ -271,8 +314,31 @@ checkpointer。摘要、语义搜索与智能剪辑只分析字幕，尚无视�
 -   对已上传视频生成时间轴字幕，转写结果写入共享存储并返回侧栏
 -   使用字幕生成摘要、搜索相关片段或生成剪辑建议；Agent 可将自然语言目标转换为工具调用
 
+## ⚡ 性能（当前架构实测）
+
+环境：Apple M5、macOS 26、**Debug 构建**、素材为 1920×1080/60fps 的合成视频（`resource/bench-1080p60.mp4`）。
+
+| 指标 | 实测 |
+| --- | --- |
+| 服务端编码推流（含录制负载） | **59.55 / 60.00 fps**，4.0–4.1 Mbps |
+| ICE 建连 / 建连后首帧 | 69 ms / 12.3 ms |
+| 控制面 | p50 **0.11 ms**（直连 gRPC）、**1.07 ms**（HTTP → 网关） |
+| `media_server` 常驻内存 | 14.6 MB（推流前后无增长） |
+| 转写 132 s 视频 | 6.4 s，17 条带时间戳字幕 |
+| 导出 20 s 片段 | 5.28 s（3.8× 实时） |
+
+```sh
+.venv/bin/python scripts/bench_metrics.py --clip resource/bench-1080p60.mp4
+```
+
+采集方法、两个由基准发现并修复的缺陷（16 ms tick 把推流压到 46 fps、录制锁顺序反转导致死锁）以及口径说明见 [BENCHMARK.md](BENCHMARK.md)。
+
 ## 📝 开发计划
 
+-   把编码线程与同步线程解耦：当前编码在同一 tick 线程内同步执行，60 fps 是这条链路的上限而非余量
+-   把 `QAudioSink` 的启动与写入统一切回主线程（当前由音频回调线程直接写 `QIODevice`）
+-   用 gRPC-Web + Envoy 让浏览器直连 `media_server` 的控制接口，去掉一跳 Python 转发
+-   为 WebRTC 增加 TURN 与拥塞控制策略，覆盖跨 NAT 部署
 -   扩展 LangGraph 的状态持久化、任务取消与真实计划节点，保持现有 Agent gRPC 工具边界
 -   新增更多滤镜特效（马赛克、复古、动态模糊）
 -   提高 RTSP/RTMP 等网络媒体源的稳定性与断线恢复能力
@@ -328,7 +394,7 @@ doubao_speech_api_key: "你的豆包语音新版控制台 API Key"
 
 语音密钥需开通 `volc.bigasr.auc_turbo`。Python Runtime 从项目根目录的 `config/secret_key.yaml` 加载配置；修改后请重启播放器。缺失字段会在 AI 侧栏显示为配置未完成，不显示密钥值。该文件被 `.gitignore` 忽略，请勿提交真实密钥。
 
-AI 助手和 Agent 工作台的模式选择会同步，且通过 Qt `QSettings` 记住上次选择。任务执行期间不能切换；如果此时尝试切换，界面会回到正在使用的模式。两种方式都由 `services/agent` 调用模型；桌面端只通过 gRPC 接收需要 UI 的工具请求并返回执行结果。
+桌面端的 AI 助手与 Agent 工作台模式选择会同步，并通过 Qt `QSettings` 记住上次选择；Web 端两个页签同步，刷新后按服务端 `/config` 返回的默认方式恢复。任务执行期间不能切换，此时尝试切换界面会回到正在使用的模式。两种方式都由 `services/agent` 调用模型；桌面端只通过 gRPC 接收需要 UI 的工具请求并返回执行结果。
 
 `doubao_api_key` 是火山方舟的模型调用密钥；`doubao_speech_api_key` 必须从[豆包语音控制台的 API Key 管理](https://console.volcengine.com/speech/new/setting/apikeys?projectName=default)获取，二者不能直接共用。请在同一语音项目下开通录音文件识别极速版。转写返回 `HTTP 401 / 45000010 Invalid X-Api-Key` 时，先核对语音密钥所属产品和项目。
 

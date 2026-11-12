@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.23)
-project(LearnAV VERSION 0.0.0)
+project(AVPlayer VERSION 0.2.0 LANGUAGES C CXX)
 
-# 设置编译器
+# ---------------------------------------------------------------------------
+# Toolchain / global settings
+# ---------------------------------------------------------------------------
 set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_EXTENSIONS ON)
@@ -10,257 +12,183 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-if (CMAKE_BUILD_TYPE STREQUAL Debug)
+if(CMAKE_BUILD_TYPE STREQUAL Debug)
     add_definitions(-DDEBUG)
-endif ()
+endif()
 
-# 设置 CCache
 find_program(CCACHE_FOUND ccache)
-if (CCACHE_FOUND)
+if(CCACHE_FOUND)
     set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
     set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
-endif (CCACHE_FOUND)
+endif()
 
-# 设置路径
-set(PROJECT_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-set(RESOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/resource")
-set(CACHE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cache")
-add_definitions(-DRESOURCE_DIR="${RESOURCE_DIR}")
-add_definitions(-DCACHE_DIR="${CACHE_DIR}")
+set(AVPLAYER_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
+set(AVPLAYER_PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
+set(AVPLAYER_RESOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/resource")
+set(AVPLAYER_CACHE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cache")
 
-# 通过 Conan 添加依赖
+# ---------------------------------------------------------------------------
+# gRPC / protobuf: desktop <-> services/agent and services/media contracts
+# ---------------------------------------------------------------------------
+list(PREPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/grpc" "/opt/homebrew/opt/protobuf")
+find_package(Protobuf CONFIG REQUIRED)
+find_package(gRPC CONFIG REQUIRED)
+
+# ---------------------------------------------------------------------------
+# libdatachannel: WebRTC transport shared by desktop playback and media service
+# ---------------------------------------------------------------------------
+include(FetchContent)
+set(NO_TESTS ON CACHE BOOL "" FORCE)
+set(NO_EXAMPLES ON CACHE BOOL "" FORCE)
+set(USE_GNUTLS OFF CACHE BOOL "" FORCE)
+set(USE_NICE OFF CACHE BOOL "" FORCE)
+# libdatachannel's vendored libsrtp links the modern OpenSSL::Crypto target
+# but also directly references the legacy Module-mode ${OPENSSL_INCLUDE_DIR}
+# variable for its own target_include_directories() call. Conan's OpenSSL
+# recipe provides a Config-mode shim that defines the target but never sets
+# that legacy variable, so libsrtp silently gets no -I flag and fails to find
+# <openssl/evp.h>. Point it at Homebrew's OpenSSL explicitly so the variable
+# is populated regardless of which find_package() resolution mode wins.
+if(APPLE)
+    set(OPENSSL_ROOT_DIR "/opt/homebrew/opt/openssl@4" CACHE PATH "" FORCE)
+    set(OPENSSL_INCLUDE_DIR "/opt/homebrew/opt/openssl@4/include" CACHE PATH "" FORCE)
+    include_directories("/opt/homebrew/opt/openssl@4/include")
+endif()
+FetchContent_Declare(
+        libdatachannel
+        SOURCE_DIR "${CMAKE_BINARY_DIR}/_deps/libdatachannel-src"
+        # Pinned to a pre-populated checkout rather than GIT_REPOSITORY: in
+        # this sandboxed dev environment, FetchContent's own git-clone
+        # subbuild step repeatedly wiped and re-cloned the 350MB checkout
+        # (including submodules) on every reconfigure, which is slow and,
+        # under this environment's flaky outbound git access, failed more
+        # often than it succeeded. On a normal machine/CI with stable network
+        # access, swap this back to:
+        #   GIT_REPOSITORY https://github.com/paullouisageneau/libdatachannel.git
+        #   GIT_TAG v0.23.1
+        #   GIT_SHALLOW TRUE
+        #   GIT_SUBMODULES_RECURSE TRUE
+        # and delete this SOURCE_DIR line; FetchContent will clone once and
+        # reuse it on subsequent configures like any other dependency.
+)
+FetchContent_MakeAvailable(libdatachannel)
+
+# ---------------------------------------------------------------------------
+# Media / vision dependencies
+# ---------------------------------------------------------------------------
 find_package(ffmpeg REQUIRED)
 
 # The Conan OpenCV package used by the original profile may omit opencv_contrib's
 # face module. Prefer a local OpenCV installation that provides LBF support.
-if (EXISTS "/opt/homebrew/lib/cmake/opencv5/OpenCVConfig.cmake")
+if(EXISTS "/opt/homebrew/lib/cmake/opencv5/OpenCVConfig.cmake")
     set(OpenCV_DIR "/opt/homebrew/lib/cmake/opencv5" CACHE PATH
         "OpenCV package configuration directory" FORCE)
-endif ()
+endif()
 find_package(OpenCV REQUIRED)
 set(AVPLAYER_HAS_OPENCV_FACE FALSE)
-foreach (OPENCV_INCLUDE_DIR IN LISTS OpenCV_INCLUDE_DIRS)
-    if (EXISTS "${OPENCV_INCLUDE_DIR}/opencv2/face.hpp")
+foreach(OPENCV_INCLUDE_DIR IN LISTS OpenCV_INCLUDE_DIRS)
+    if(EXISTS "${OPENCV_INCLUDE_DIR}/opencv2/face.hpp")
         set(AVPLAYER_HAS_OPENCV_FACE TRUE)
-    endif ()
-endforeach ()
-if (NOT AVPLAYER_HAS_OPENCV_FACE)
+    endif()
+endforeach()
+if(NOT AVPLAYER_HAS_OPENCV_FACE)
     message(FATAL_ERROR "OpenCV with the face module is required; set OpenCV_DIR to a matching OpenCV installation")
-endif ()
-if (TARGET opencv::opencv)
+endif()
+if(TARGET opencv::opencv)
     set(AVPLAYER_OPENCV_LIBS opencv::opencv)
-else ()
+else()
     set(AVPLAYER_OPENCV_LIBS ${OpenCV_LIBS})
-endif ()
+endif()
 find_package(stb REQUIRED)
 find_package(glm REQUIRED)
-include_directories(${ffmpeg_INCLUDE_DIRS})
-include_directories(${OpenCV_INCLUDE_DIRS})
-include_directories(${stb_INCLUDE_DIRS})
 
-# Keep all Qt modules on the same minor version. Homebrew can leave qtbase at
-# 6.11 while qtmultimedia is still 6.10, which produces a link-time ABI crash.
-if (EXISTS "/opt/homebrew/Cellar/qtbase/6.10.2/lib/cmake/Qt6/Qt6Config.cmake"
-    AND EXISTS "/opt/homebrew/Cellar/qtmultimedia/6.10.2/lib/cmake/Qt6Multimedia/Qt6MultimediaConfig.cmake"
-    AND EXISTS "/opt/homebrew/Cellar/qtdeclarative/6.10.2/lib/cmake/Qt6Quick/Qt6QuickConfig.cmake")
-    set(Qt6_DIR "/opt/homebrew/Cellar/qtbase/6.10.2/lib/cmake/Qt6" CACHE PATH
+# Opus: WebRTC audio track (server encode) and Qt client decode.
+find_package(Opus CONFIG QUIET)
+if(NOT TARGET Opus::opus)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
+    add_library(Opus::opus INTERFACE IMPORTED)
+    target_link_libraries(Opus::opus INTERFACE PkgConfig::OPUS)
+endif()
+
+# ---------------------------------------------------------------------------
+# Qt: keep all modules on the same minor version
+# ---------------------------------------------------------------------------
+# Homebrew can leave qtbase on a newer minor than qtmultimedia/qtdeclarative
+# after an unrelated `brew upgrade`/`brew reinstall`, which produces a
+# link-time ABI crash. Resolve each module's actual installed Cellar version
+# at configure time (rather than hardcoding one, which breaks the moment
+# Homebrew bumps a revision suffix) and only pin them together when their
+# major.minor agree.
+function(avplayer_latest_cellar_version keg_name out_version)
+    file(GLOB AVPLAYER_KEG_DIRS LIST_DIRECTORIES true "/opt/homebrew/Cellar/${keg_name}/*")
+    set(AVPLAYER_LATEST "")
+    foreach(AVPLAYER_KEG_DIR ${AVPLAYER_KEG_DIRS})
+        if(IS_DIRECTORY "${AVPLAYER_KEG_DIR}")
+            get_filename_component(AVPLAYER_KEG_VERSION "${AVPLAYER_KEG_DIR}" NAME)
+            if(AVPLAYER_LATEST STREQUAL "" OR AVPLAYER_KEG_VERSION VERSION_GREATER AVPLAYER_LATEST)
+                set(AVPLAYER_LATEST "${AVPLAYER_KEG_VERSION}")
+            endif()
+        endif()
+    endforeach()
+    set(${out_version} "${AVPLAYER_LATEST}" PARENT_SCOPE)
+endfunction()
+
+avplayer_latest_cellar_version(qtbase AVPLAYER_QTBASE_VERSION)
+avplayer_latest_cellar_version(qtmultimedia AVPLAYER_QTMM_VERSION)
+avplayer_latest_cellar_version(qtdeclarative AVPLAYER_QTDECL_VERSION)
+# Compare only the major.minor prefix (e.g. "6.12"), ignoring the trailing
+# "_N" Homebrew revision suffix which legitimately differs between modules.
+string(REGEX MATCH "^[0-9]+\\.[0-9]+" AVPLAYER_QTBASE_MINOR "${AVPLAYER_QTBASE_VERSION}")
+string(REGEX MATCH "^[0-9]+\\.[0-9]+" AVPLAYER_QTMM_MINOR "${AVPLAYER_QTMM_VERSION}")
+string(REGEX MATCH "^[0-9]+\\.[0-9]+" AVPLAYER_QTDECL_MINOR "${AVPLAYER_QTDECL_VERSION}")
+
+if(NOT AVPLAYER_QTBASE_VERSION STREQUAL ""
+    AND AVPLAYER_QTBASE_MINOR STREQUAL AVPLAYER_QTMM_MINOR
+    AND AVPLAYER_QTBASE_MINOR STREQUAL AVPLAYER_QTDECL_MINOR
+    AND EXISTS "/opt/homebrew/Cellar/qtbase/${AVPLAYER_QTBASE_VERSION}/lib/cmake/Qt6/Qt6Config.cmake")
+    set(Qt6_DIR "/opt/homebrew/Cellar/qtbase/${AVPLAYER_QTBASE_VERSION}/lib/cmake/Qt6" CACHE PATH
         "Qt6 package configuration directory" FORCE)
-    foreach (QT_COMPONENT Core Gui Widgets OpenGL OpenGLWidgets Network Concurrent CoreTools GuiTools WidgetsTools Multimedia Quick Qml)
-        if (QT_COMPONENT STREQUAL "Multimedia")
-            set(QT_COMPONENT_ROOT "/opt/homebrew/Cellar/qtmultimedia/6.10.2/lib/cmake/Qt6Multimedia")
-        elseif (QT_COMPONENT STREQUAL "Quick" OR QT_COMPONENT STREQUAL "Qml")
-            set(QT_COMPONENT_ROOT "/opt/homebrew/Cellar/qtdeclarative/6.10.2/lib/cmake/Qt6${QT_COMPONENT}")
-        else ()
-            set(QT_COMPONENT_ROOT "/opt/homebrew/Cellar/qtbase/6.10.2/lib/cmake/Qt6${QT_COMPONENT}")
-        endif ()
-        if (EXISTS "${QT_COMPONENT_ROOT}")
+    foreach(QT_COMPONENT Core Gui Widgets OpenGL OpenGLWidgets Network Concurrent CoreTools GuiTools WidgetsTools Multimedia Quick Qml)
+        if(QT_COMPONENT STREQUAL "Multimedia")
+            set(QT_COMPONENT_ROOT "/opt/homebrew/Cellar/qtmultimedia/${AVPLAYER_QTMM_VERSION}/lib/cmake/Qt6Multimedia")
+        elseif(QT_COMPONENT STREQUAL "Quick" OR QT_COMPONENT STREQUAL "Qml")
+            set(QT_COMPONENT_ROOT "/opt/homebrew/Cellar/qtdeclarative/${AVPLAYER_QTDECL_VERSION}/lib/cmake/Qt6${QT_COMPONENT}")
+        else()
+            set(QT_COMPONENT_ROOT "/opt/homebrew/Cellar/qtbase/${AVPLAYER_QTBASE_VERSION}/lib/cmake/Qt6${QT_COMPONENT}")
+        endif()
+        if(EXISTS "${QT_COMPONENT_ROOT}")
             set(Qt6${QT_COMPONENT}_DIR "${QT_COMPONENT_ROOT}" CACHE PATH
                 "Qt6 ${QT_COMPONENT} package configuration directory" FORCE)
-        endif ()
-    endforeach ()
+        endif()
+    endforeach()
     list(PREPEND CMAKE_PREFIX_PATH
-        "/opt/homebrew/Cellar/qtbase/6.10.2"
-        "/opt/homebrew/Cellar/qtmultimedia/6.10.2"
-        "/opt/homebrew/Cellar/qtdeclarative/6.10.2")
-endif ()
+        "/opt/homebrew/Cellar/qtbase/${AVPLAYER_QTBASE_VERSION}"
+        "/opt/homebrew/Cellar/qtmultimedia/${AVPLAYER_QTMM_VERSION}"
+        "/opt/homebrew/Cellar/qtdeclarative/${AVPLAYER_QTDECL_VERSION}")
+else()
+    message(WARNING "Qt modules are on mismatched minor versions "
+            "(qtbase=${AVPLAYER_QTBASE_VERSION} qtmultimedia=${AVPLAYER_QTMM_VERSION} "
+            "qtdeclarative=${AVPLAYER_QTDECL_VERSION}); falling back to default CMake "
+            "package resolution, which may produce a link-time ABI crash. Run "
+            "`brew upgrade qtbase qtmultimedia qtdeclarative` to realign them.")
+endif()
 
-# 添加 QT
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Multimedia Quick Network Concurrent)
-
+find_package(Qt6 REQUIRED COMPONENTS
+    Core Gui Widgets OpenGL OpenGLWidgets Multimedia Quick Network Concurrent)
 find_package(GLEW REQUIRED)
 find_package(glfw3 REQUIRED)
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
-set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTOUIC ON)
-set(CMAKE_AUTORCC ON)
-# 添加头文件路径
-set(INCLUDE_DIRS
-        ${PROJECT_ROOT_DIR}/LearnAV/include
-        ${PROJECT_ROOT_DIR}/LearnAV/src
-        ${Qt6_INCLUDES}
-        ${Qt6OpenGL_INCLUDE_DIRS}
-        ${Qt6OpenGLWidgets_INCLUDE_DIRS}
-        ${Qt6Multimedia_INCLUDE_DIRS}
-)
 
-# 添加静态库源文件
-file(GLOB_RECURSE LIBRARY_SOURCE_FILES ${PROJECT_ROOT_DIR}/LearnAV/*.cpp)
-# 创建静态库
-add_library(${PROJECT_NAME} STATIC ${LIBRARY_SOURCE_FILES}
-        AV/src/Agent/AgentBridge.cpp
-        AV/src/Agent/AgentBridge.h
-        AV/src/Agent/AudioExtractionService.cpp
-        AV/src/Agent/AudioExtractionService.h
-        AV/src/Agent/AgentProtocol.cpp
-        AV/src/Agent/AgentProtocol.h
-        AV/src/Agent/ClipExportService.cpp
-        AV/src/Agent/ClipExportService.h
-        AV/src/Agent/IAgentTool.h
-        AV/src/Agent/ToolDispatcher.cpp
-        AV/src/Agent/ToolDispatcher.h
-        AV/src/AI/TranscriptStore.cpp
-        AV/src/AI/TranscriptStore.h
-        AV/src/AI/AIAssistantService.cpp
-        AV/src/AI/AIAssistantService.h
-        AV/src/AI/IPlayerControl.h
-        AV/src/Core/TaskPool.cpp
-        AV/src/Core/TaskPool.h
-        AV/src/Reader/Interface/IDeMuxer.h
-        AV/src/Define/BaseDef.h
-        AV/src/Define/IAVPacket.h
-        AV/src/Reader/DeMuxer.cpp
-        AV/src/Reader/DeMuxer.h
-        AV/src/Core/SyncNotifier.cpp
-        AV/src/Core/SyncNotifier.h
-        AV/src/Reader/MiniDecoder.cpp
-        AV/src/Reader/MiniDecoder.h
-        AV/src/Define/IAudioSamples.h
-        AV/src/Define/IVideoFrame.h
-        AV/src/Engine/IGLContext.h
-        AV/src/Engine/GLContext.cpp
-        AV/src/Reader/Interface/IVideoDecoder.h
-        AV/src/Reader/Interface/IAudioDecoder.h
-        AV/src/Reader/VideoDecoder.cpp
-        AV/src/Reader/VideoDecoder.h
-        AV/src/Reader/AudioDecoder.cpp
-        AV/src/Reader/AudioDecoder.h
-        AV/src/Reader/Interface/IFileReader.h
-        AV/src/Reader/FileReader.cpp
-        AV/src/Reader/FileReader.h
-        AV/src/Reader/VideoRender.cpp
-        AV/src/Reader/VideoRender.h
-        AV/src/Engine/AudioRender.cpp
-        AV/src/Engine/AudioRender.h
-        AV/src/Engine/AVSynchronizer.cpp
-        AV/src/Engine/AVSynchronizer.h
-        AV/src/Display/VideoDisplay.cpp
-        AV/src/Display/VideoDisplay.h
-        AV/src/FaceDetect/IFaceLandmarkDetector.h
-        AV/src/FaceDetect/OpenCVLbfFaceLandmarkDetector.cpp
-        AV/src/FaceDetect/OpenCVLbfFaceLandmarkDetector.h
-        AV/src/FaceDetect/StickerPlacementEstimator.cpp
-        AV/src/FaceDetect/StickerPlacementEstimator.h
-        AV/src/VideoFilter/FlipVerticalFilter.cpp
-        AV/src/VideoFilter/FlipVerticalFilter.h
-        AV/src/VideoFilter/GrayFilter.cpp
-        AV/src/VideoFilter/GrayFilter.h
-        AV/src/VideoFilter/InvertFilter.cpp
-        AV/src/VideoFilter/InvertFilter.h
-        AV/src/VideoFilter/StickerFilter.cpp
-        AV/src/VideoFilter/StickerFilter.h
-        AV/src/VideoFilter/VideoFilter.cpp
-        AV/src/VideoFilter/VideoFilter.h
-        AV/include/IVideoFilter.h
-        AV/src/Network/NetworkSession.cpp
-        AV/src/Network/NetworkSession.h
-        AV/src/Writer/IMediaWriter.h
-        AV/src/Writer/IRecorder.h
-        AV/src/Writer/IRecordSession.h
-        AV/src/Writer/IMuxer.h
-        AV/src/Writer/Interface/IAudioEncoder.h
-        AV/src/Writer/Interface/IVideoEncoder.h
-        AV/src/Writer/AudioEncoder.cpp
-        AV/src/Writer/AudioEncoder.h
-        AV/src/Writer/Recorder.cpp
-        AV/src/Writer/Recorder.h
-        AV/src/Writer/RecordSession.cpp
-        AV/src/Writer/RecordSession.h
-        AV/src/Writer/MediaWriter.h
-        AV/src/Writer/Muxer.cpp
-        AV/src/Writer/Muxer.h
-        AV/src/Writer/Mp4Muxer.cpp
-        AV/src/Writer/Mp4Muxer.h
-        AV/src/Writer/VideoEncoder.cpp
-        AV/src/Writer/VideoEncoder.h
+# ---------------------------------------------------------------------------
+# Deployment units
+# ---------------------------------------------------------------------------
+add_subdirectory(proto)
+add_subdirectory(libs/media-core)
 
-)
-target_compile_definitions(${PROJECT_NAME} PRIVATE AVPLAYER_PROJECT_ROOT="${PROJECT_ROOT_DIR}")
-# 为静态库添加头文件路径
-#target_include_directories(${PROJECT_NAME} PUBLIC ${INCLUDE_DIRS} ${PROJECT_ROOT_DIR}/3rdparty/InspireFace/include)
-# 为静态库添加链接库
-target_link_libraries(${PROJECT_NAME} PRIVATE
-        ffmpeg::ffmpeg
-        ${AVPLAYER_OPENCV_LIBS}
-        stb::stb
-        glm::glm
-        Qt6::Widgets       # <--- 必须添加这一行
-        Qt6::OpenGL
-        Qt6::OpenGLWidgets
-        Qt6::Multimedia
-        Qt6::Network
-        GLEW::GLEW
-        glfw
-        "-framework OpenGL" # macOS 原生 OpenGL 框架
-)
-# 添加 AVPlayer 源文件
-file(GLOB_RECURSE DEMO_SOURCE_FILES ${PROJECT_ROOT_DIR}/qt/*.cpp)
-# 创建 AVPlayer
-add_executable(AVPlayer ${DEMO_SOURCE_FILES})
-target_compile_definitions(AVPlayer PRIVATE AVPLAYER_PROJECT_ROOT="${PROJECT_ROOT_DIR}")
-# 为 AVPlayer 添加头文件路径
-target_include_directories(AVPlayer PRIVATE ${PROJECT_ROOT_DIR}/qt ${PROJECT_ROOT_DIR}/LearnAV/qt)
-# 为 AVPlayer 添加链接库
-# Link Concurrent directly so QtMultimedia's opt-path dependency resolves to
-# the same pinned qtbase release as the rest of the process.
-target_link_libraries(AVPlayer Qt6::Core Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Quick Qt6::Network Qt6::Concurrent ${PROJECT_NAME})
+# media_server is independently buildable from services/media; in the
+# top-level build both its executable and the smoke client are available.
+option(AVPLAYER_BUILD_STREAMING_SMOKE_CLIENT
+    "Build the standalone WebRTC receive smoke client" ON)
+add_subdirectory(services/media)
 
-if (APPLE AND EXISTS "/opt/homebrew/Cellar/qtbase/6.10.2/lib")
-    # Homebrew's `opt` symlink may point qtbase at a newer minor release than
-    # qtmultimedia. Rewrite the executable's framework IDs so CLion can launch
-    # it without requiring DYLD_FRAMEWORK_PATH in the run configuration.
-    set(AVPLAYER_QTBASE_LIB "/opt/homebrew/Cellar/qtbase/6.10.2/lib")
-    set(AVPLAYER_QTMM_LIB "/opt/homebrew/Cellar/qtmultimedia/6.10.2/lib")
-    set(AVPLAYER_QTDECL_LIB "/opt/homebrew/Cellar/qtdeclarative/6.10.2/lib")
-    add_custom_command(TARGET AVPlayer POST_BUILD
-        COMMAND install_name_tool -change
-        "/opt/homebrew/opt/qtbase/lib/QtCore.framework/Versions/A/QtCore"
-        "${AVPLAYER_QTBASE_LIB}/QtCore.framework/Versions/A/QtCore" $<TARGET_FILE:AVPlayer>
-        COMMAND install_name_tool -change
-        "/opt/homebrew/opt/qtbase/lib/QtGui.framework/Versions/A/QtGui"
-        "${AVPLAYER_QTBASE_LIB}/QtGui.framework/Versions/A/QtGui" $<TARGET_FILE:AVPlayer>
-        COMMAND install_name_tool -change
-        "/opt/homebrew/opt/qtbase/lib/QtWidgets.framework/Versions/A/QtWidgets"
-        "${AVPLAYER_QTBASE_LIB}/QtWidgets.framework/Versions/A/QtWidgets" $<TARGET_FILE:AVPlayer>
-        COMMAND install_name_tool -change
-        "/opt/homebrew/opt/qtbase/lib/QtNetwork.framework/Versions/A/QtNetwork"
-        "${AVPLAYER_QTBASE_LIB}/QtNetwork.framework/Versions/A/QtNetwork" $<TARGET_FILE:AVPlayer>
-        COMMAND install_name_tool -change
-        "/opt/homebrew/opt/qtbase/lib/QtConcurrent.framework/Versions/A/QtConcurrent"
-        "${AVPLAYER_QTBASE_LIB}/QtConcurrent.framework/Versions/A/QtConcurrent" $<TARGET_FILE:AVPlayer>
-        COMMAND install_name_tool -change
-        "/opt/homebrew/opt/qtbase/lib/QtOpenGL.framework/Versions/A/QtOpenGL"
-        "${AVPLAYER_QTBASE_LIB}/QtOpenGL.framework/Versions/A/QtOpenGL" $<TARGET_FILE:AVPlayer>
-        COMMAND install_name_tool -change
-        "/opt/homebrew/opt/qtbase/lib/QtOpenGLWidgets.framework/Versions/A/QtOpenGLWidgets"
-        "${AVPLAYER_QTBASE_LIB}/QtOpenGLWidgets.framework/Versions/A/QtOpenGLWidgets" $<TARGET_FILE:AVPlayer>
-        COMMAND install_name_tool -change
-        "/opt/homebrew/opt/qtmultimedia/lib/QtMultimedia.framework/Versions/A/QtMultimedia"
-        "${AVPLAYER_QTMM_LIB}/QtMultimedia.framework/Versions/A/QtMultimedia" $<TARGET_FILE:AVPlayer>
-        COMMAND install_name_tool -change
-        "/opt/homebrew/opt/qtdeclarative/lib/QtQuick.framework/Versions/A/QtQuick"
-        "${AVPLAYER_QTDECL_LIB}/QtQuick.framework/Versions/A/QtQuick" $<TARGET_FILE:AVPlayer>
-        COMMAND install_name_tool -change
-        "/opt/homebrew/opt/qtdeclarative/lib/QtQml.framework/Versions/A/QtQml"
-        "${AVPLAYER_QTDECL_LIB}/QtQml.framework/Versions/A/QtQml" $<TARGET_FILE:AVPlayer>
-    )
-endif ()
+add_subdirectory(apps/desktop)

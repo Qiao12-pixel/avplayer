@@ -18,7 +18,7 @@ ffmpeg -f lavfi -i 'testsrc2=size=1920x1080:rate=60' \
   -t 15 -c:v libx264 -preset ultrafast -crf 24 -pix_fmt yuv420p \
   -c:a aac -b:a 128k -y /tmp/avplayer-1080p60-h264.mp4
 
-./AVPlayer --benchmark /tmp/avplayer-1080p60-h264.mp4 --seconds 12 \
+./cmake-build-debug/apps/desktop/AVPlayer --benchmark /tmp/avplayer-1080p60-h264.mp4 --seconds 12 \
   --sticker --record /tmp/avplayer-recorded.mp4
 ```
 

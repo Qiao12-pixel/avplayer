@@ -1,0 +1,20 @@
+{
+  "name": "avplayer-web-client",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vitejs/plugin-basic-ssl": "^1.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "~5.7.2",
+    "vite": "^6.0.7"
+  }
+}

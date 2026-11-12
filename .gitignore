@@ -18,11 +18,14 @@ out/
 *.lib
 *.log
 
-# Conan 缓存
+# 依赖与 Python 缓存
+.claude/
 .conan/
 .venv/
 __pycache__/
 *.pyc
+*.egg-info/
+dist/
 
 # 系统垃圾文件
 .DS_Store
@@ -31,10 +34,13 @@ Thumbs.db
 # 本地凭据与生成的字幕
 config/*
 !config/secret_key.example.yaml
-resource/*.ai.srt
 resource/
-!resource/
-resource/ollama/*
-!resource/ollama/.gitkeep
-resource/whisper-small/*
-!resource/whisper-small/.gitkeep
+docs/
+
+# 运行期数据
+storage/
+cache/
+deploy/.env
+
+# Generated gRPC stubs are committed for installability; regenerate with
+# scripts/gen_proto.sh after proto/agent.proto changes.

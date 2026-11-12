@@ -1,0 +1,123 @@
+name: avplayer
+
+# Shared env file: cp deploy/.env.example deploy/.env
+# Start everything: docker compose -f deploy/docker-compose.yml up --build
+# Local model profile: docker compose -f deploy/docker-compose.yml --profile local up --build
+
+services:
+  agent:
+    build:
+      context: ..
+      dockerfile: deploy/agent.Dockerfile
+    image: avplayer-agent:local
+    environment:
+      AVPLAYER_PROJECT_ROOT: /app
+      AVPLAYER_STORAGE_ROOT: /data/storage
+      AVPLAYER_AGENT_BIND: 0.0.0.0
+      AVPLAYER_AGENT_PORT: "50061"
+      AVPLAYER_MEDIA_SERVER: media:50062
+      AVPLAYER_AI_PROVIDER: ${AVPLAYER_AI_PROVIDER:-cloud}
+      AVPLAYER_OLLAMA_HOST: ${AVPLAYER_OLLAMA_HOST:-http://ollama:11434}
+      AVPLAYER_REDIS_URL: ${AVPLAYER_REDIS_URL:-redis://redis:6379/0}
+      AVPLAYER_MYSQL_DSN: ${AVPLAYER_MYSQL_DSN:-mysql://avplayer:avplayer@mysql:3306/avplayer?charset=utf8mb4}
+    ports:
+      - "${AVPLAYER_AGENT_PORT:-50061}:50061"
+    volumes:
+      - ${AVPLAYER_STORAGE_DIR:-../storage}:/data/storage
+      - ${AVPLAYER_CONFIG_DIR:-../config}:/app/config:ro
+      - ${AVPLAYER_RESOURCE_DIR:-../resource}:/app/resource:ro
+    restart: unless-stopped
+    # Both stores are optional at runtime (the agent degrades to disk), but a
+    # Compose stack ships them so the dual-write path is exercised by default.
+    depends_on:
+      - redis
+      - mysql
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${AVPLAYER_REDIS_PORT:-6379}:6379"
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: avplayer
+      MYSQL_USER: avplayer
+      MYSQL_PASSWORD: ${AVPLAYER_MYSQL_PASSWORD:-avplayer}
+      MYSQL_ROOT_PASSWORD: ${AVPLAYER_MYSQL_ROOT_PASSWORD:-avplayer-root}
+    command:
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+    ports:
+      - "${AVPLAYER_MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - mysql
+
+  media:
+    build:
+      context: ..
+      dockerfile: deploy/media.Dockerfile
+    image: avplayer-media:local
+    environment:
+      AVPLAYER_MEDIA_SERVER_ADDRESS: 0.0.0.0:50062
+      AVPLAYER_STORAGE_ROOT: /data/storage
+      AVPLAYER_ICE_SERVERS: ${AVPLAYER_ICE_SERVERS:-stun:stun.l.google.com:19302}
+    ports:
+      - "${AVPLAYER_MEDIA_SERVER_PORT:-50062}:50062"
+    volumes:
+      - ${AVPLAYER_STORAGE_DIR:-../storage}:/data/storage
+    restart: unless-stopped
+
+  web-gateway:
+    build:
+      context: ..
+      dockerfile: deploy/agent.Dockerfile
+    image: avplayer-agent:local
+    command: ["avplayer-web-gateway"]
+    environment:
+      AVPLAYER_PROJECT_ROOT: /app
+      AVPLAYER_AGENT_SERVER: agent:50061
+      AVPLAYER_MEDIA_SERVER: media:50062
+      AVPLAYER_WEB_GATEWAY_HOST: 0.0.0.0
+      AVPLAYER_WEB_GATEWAY_PORT: "50065"
+      AVPLAYER_ICE_SERVERS: ${AVPLAYER_ICE_SERVERS:-stun:stun.l.google.com:19302}
+    ports:
+      - "${AVPLAYER_WEB_GATEWAY_PORT:-50065}:50065"
+    depends_on:
+      - agent
+      - redis
+      - media
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+    image: avplayer-web:local
+    ports:
+      - "${AVPLAYER_WEB_PORT:-8080}:80"
+    depends_on:
+      - web-gateway
+    restart: unless-stopped
+
+  # Optional local-model backend. Pull a model once:
+  #   docker compose -f deploy/docker-compose.yml --profile local \
+  #     exec ollama ollama pull qwen3:4b
+  ollama:
+    profiles: ["local"]
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - "${AVPLAYER_OLLAMA_PORT:-11434}:11434"
+    restart: unless-stopped
+
+volumes:
+  ollama-models:
+  mysql-data:

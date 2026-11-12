@@ -14,7 +14,7 @@ fi
 if [[ ! -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
   python3 -m venv "$PROJECT_ROOT/.venv"
 fi
-"$PROJECT_ROOT/.venv/bin/python" -m pip install -r "$PROJECT_ROOT/agent/requirements.txt"
+"$PROJECT_ROOT/.venv/bin/python" -m pip install -e "$PROJECT_ROOT/services/agent"
 
 if ! OLLAMA_HOST="http://$OLLAMA_HOST" curl -fsS "http://$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
   OLLAMA_HOST="$OLLAMA_HOST" OLLAMA_MODELS="$OLLAMA_MODELS" ollama serve \

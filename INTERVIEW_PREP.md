@@ -170,7 +170,7 @@ seek 时不只是移动 demuxer 的读指针，还会 flush FFmpeg format contex
 - 目前大量日志是 `std::cout/std::cerr`，生产环境应该统一日志库和错误码。
 - 解码后统一 RGBA/S16 简化了工程，但性能不是最优。
 - 测试覆盖不足，尤其是并发、seek、时间戳和录制。
-- CMake 里还有历史路径名 `LearnAV`，工程命名和目录命名需要清理。
+- 构建目标已按部署单元拆分：`avplayer_proto`、`avplayer_media_core`、`avplayer_desktop_core`、`media_server`。
 
 ## 9. 今晚突击顺序
 
@@ -206,9 +206,24 @@ seek 时不只是移动 demuxer 的读指针，还会 flush FFmpeg format contex
 
 ### 数据库和缓存如果被问到
 
-这个项目本身没有数据库，不要硬编。可以这样答：
+项目里 Redis 和 MySQL 都是**可选层**，磁盘仍是唯一事实来源。可以这样答：
 
-> 这个项目没有引入数据库，因为主要状态都在本地内存和文件系统里。如果要做成服务端，比如用户上传视频、转码任务、录制文件管理，我会用数据库记录任务状态、文件元数据和错误信息，用 Redis 做任务队列、分布式锁或热点状态缓存。
+> 媒体文件和产物不放数据库，放共享卷：解码、转码、导出的输入输出都是大文件，
+> 走文件系统更合适，`media_server` 直接按路径读，省掉一次序列化。
+>
+> Redis 只缓存字幕的 JSON（`avplayer:transcript:<session>:<media>`，带 TTL）。
+> 转写写一次、摘要/语义搜索/智能剪辑读很多次，缓存命中的收益明显；Redis 挂了
+> 就读磁盘，任务不受影响。
+>
+> MySQL 存 `sessions`、`media`、`transcripts`、`segments`、`task_runs`：这类是
+> 结构化元数据，需要按会话查询历史、统计失败率时比翻目录方便。表在首次连接时
+> 自动创建，写入是 best-effort，失败不影响主流程。
+>
+> 读取顺序是 Redis → 磁盘 → MySQL，未命中会回填缓存。三层任何一层不可用都
+> 静默降级，所以本地开发可以完全不启动 Redis/MySQL。
+
+如果被追问“为什么不直接把字幕放 MySQL 就够了”，可以补一句：转写结果要立刻被
+同一进程读回，Redis 的延迟和 TTL 语义更贴合；MySQL 承担的是跨实例和历史查询。
 
 ### 项目如何改成后端服务
 
@@ -223,14 +238,14 @@ seek 时不只是移动 demuxer 的读指针，还会 flush FFmpeg format contex
 
 ## 11. 源码定位
 
-- UI 启动播放和控制：`qt/MainWindow.cpp`
-- 播放链路组织：`AV/src/Reader/FileReader.cpp`
-- 解封装和 seek：`AV/src/Reader/DeMuxer.cpp`
-- 音频解码和重采样：`AV/src/Reader/AudioDecoder.cpp`
-- 视频解码和 RGBA 转换：`AV/src/Reader/VideoDecoder.cpp`
-- 音视频同步：`AV/src/Engine/AVSynchronizer.cpp`
-- 音频输出：`AV/src/Engine/AudioRender.cpp`
-- OpenGL 显示和滤镜：`AV/src/Display/VideoDisplay.cpp`
-- 录制入口：`AV/src/Writer/RecordSession.cpp`
-- 编码和封装：`AV/src/Writer/Recorder.cpp`、`AV/src/Writer/VideoEncoder.cpp`、`AV/src/Writer/AudioEncoder.cpp`、`AV/src/Writer/Muxer.cpp`
-- 网络状态：`AV/src/Network/NetworkSession.cpp`
+- UI 启动播放和控制：`apps/desktop/MainWindow.cpp`
+- 播放链路组织：`libs/media-core/src/Reader/FileReader.cpp`
+- 解封装和 seek：`libs/media-core/src/Reader/DeMuxer.cpp`
+- 音频解码和重采样：`libs/media-core/src/Reader/AudioDecoder.cpp`
+- 视频解码和 RGBA 转换：`libs/media-core/src/Reader/VideoDecoder.cpp`
+- 音视频同步：`libs/media-core/src/Engine/AVSynchronizer.cpp`
+- 音频输出：`libs/media-core/src/Engine/AudioRender.cpp`
+- OpenGL 显示和滤镜：`apps/desktop/src/Display/VideoDisplay.cpp`
+- 录制入口：`libs/media-core/src/Writer/RecordSession.cpp`
+- 编码和封装：`libs/media-core/src/Writer/Recorder.cpp`、`libs/media-core/src/Writer/VideoEncoder.cpp`、`libs/media-core/src/Writer/AudioEncoder.cpp`、`libs/media-core/src/Writer/Muxer.cpp`
+- 网络状态：`apps/desktop/src/Network/NetworkSession.cpp`

@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package avplayer.agent.v1;
+
+// Media upload: client streams a local file to the server; server stores it
+// under storage/<session_id>/<media_id>/original.<ext> and returns a handle
+// that replaces local file paths in subsequent AgentService calls.
+service MediaService {
+  rpc UploadMedia(stream MediaChunk) returns (MediaHandle);
+}
+
+message MediaChunk {
+  // Only required on the first chunk of the stream.
+  string session_id = 1;
+  string file_name = 2;
+  bytes data = 3;
+}
+
+message MediaHandle {
+  string media_id = 1;
+  int64 size_bytes = 2;
+}
+
+// Agent orchestration: one bidirectional stream per session for the
+// avplayer.agent.v1 message envelope. Message field names mirror the payload
+// shapes produced by services/agent/avplayer_agent/protocol.py.
+service AgentService {
+  rpc Converse(stream ClientMessage) returns (stream ServerMessage);
+}
+
+message ClientMessage {
+  string type = 1;          // tool_catalog | provider | tool_result | goal | task | shutdown
+  string request_id = 2;
+  string session_id = 3;
+  string media_id = 4;      // replaces local source_path for goal/task requests
+  string tool = 5;          // set on tool_result
+  Struct payload = 6;
+  Struct arguments = 7;
+}
+
+message ServerMessage {
+  string type = 1;           // status | final | task_result | tool_call | provider_status | error
+  string request_id = 2;
+  string session_id = 3;
+  string tool = 4;           // set on tool_call
+  Struct payload = 5;
+  Struct arguments = 6;
+}
+
+// Minimal JSON-like value type so we don't have to hand-maintain a message
+// per payload shape; mirrors google.protobuf.Struct semantics without adding
+// the well-known-types dependency to the build.
+message Struct {
+  string json = 1;  // UTF-8 JSON document
+}
+
+// Phase 2: server-side decode/render + WebRTC streaming (see the project
+// plan, "检查点 B"). Hosted by the C++ `media_server` in services/media, reusing
+// media already uploaded through MediaService by the agent service.
+service StreamingService {
+  // One call = one PeerConnection negotiation for a (session_id, media_id).
+  // The client sends the first message with type "offer" (sdp set,
+  // session_id/media_id set); the server replies with type "answer", then
+  // both sides may exchange further messages with type "ice" as candidates
+  // trickle in.
+  rpc Signal(stream SignalMessage) returns (stream SignalMessage);
+
+  // Playback control for an already-negotiated session. `position` is a
+  // 0..1 fraction, matching the existing IFileReader::SeekTo(float) contract.
+  rpc Control(ControlRequest) returns (ControlAck);
+}
+
+message SignalMessage {
+  string session_id = 1;
+  string media_id = 2;
+  string kind = 3;       // "offer" | "answer" | "ice"
+  string sdp = 4;        // set for "offer"/"answer"
+  string candidate = 5;  // set for "ice"
+  string mid = 6;        // set for "ice"
+}
+
+message ControlRequest {
+  string session_id = 1;
+  string media_id = 2;
+  // "play" | "pause" | "seek" | "status" | "record_start" | "record_stop"
+  string action = 3;
+  float position = 4; // used for "seek"
+}
+
+message ControlAck {
+  bool success = 1;
+  string error = 2;
+  // Playback state, also returned for action="status".
+  double duration_ms = 3;
+  double position_ms = 4;
+  bool playing = 5;
+  bool recording = 6;
+  // Set for record_start/record_stop (server-side recording output).
+  string output_path = 7;
+}

@@ -12,4 +12,10 @@ QT_DECL_ROOT=/opt/homebrew/Cellar/qtdeclarative/6.10.2
 export QT_QPA_PLATFORM_PLUGIN_PATH="$QT_ROOT/share/qt/plugins/platforms"
 export DYLD_FRAMEWORK_PATH="$QT_ROOT/lib:$QT_MM_ROOT/lib:$QT_DECL_ROOT/lib${DYLD_FRAMEWORK_PATH:+:$DYLD_FRAMEWORK_PATH}"
 
-exec "$BUILD_DIR/AVPlayer" "$@"
+APP="$BUILD_DIR/apps/desktop/AVPlayer"
+if [ ! -x "$APP" ]; then
+    echo "AVPlayer not found at $APP; build it with:" >&2
+    echo "  cmake --build $BUILD_DIR --target AVPlayer" >&2
+    exit 1
+fi
+exec "$APP" "$@"

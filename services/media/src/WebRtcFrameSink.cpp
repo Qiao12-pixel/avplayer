@@ -1,7 +1,9 @@
 #include "WebRtcFrameSink.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
+#include <string>
 
 #include "Writer/IRecorder.h"
 
@@ -14,6 +16,9 @@ namespace av {
 WebRtcFrameSink::WebRtcFrameSink(std::shared_ptr<rtc::Track> videoTrack)
     : m_videoTrack(std::move(videoTrack)), m_encoder(IVideoEncoder::Create()) {
     m_encoder->SetListener(this);
+    const char* stats = std::getenv("AVPLAYER_STREAM_STATS");
+    m_stats = stats != nullptr && std::string(stats) == "1";
+    m_statWindow = std::chrono::steady_clock::now();
 }
 
 WebRtcFrameSink::~WebRtcFrameSink() {
@@ -60,7 +65,22 @@ void WebRtcFrameSink::OnNotifyVideoPacket(std::shared_ptr<IAVPacket> packet) {
         const float packetTs = packet->GetTimeStamp();
         m_videoTrack->sendFrame(nalUnits,
                                 rtc::FrameInfo(std::chrono::duration<double>(packetTs > 0.0f ? packetTs : 0.0)));
-        std::cerr << "[WebRtcFrameSink] sent " << nalUnits.size() << " bytes" << std::endl;
+        if (m_stats) {
+            m_statFrames.fetch_add(1);
+            m_statBytes.fetch_add(nalUnits.size());
+            const auto now = std::chrono::steady_clock::now();
+            const double elapsed = std::chrono::duration<double>(now - m_statWindow).count();
+            if (elapsed >= 5.0) {
+                const uint64_t frames = m_statFrames.exchange(0);
+                const uint64_t bytes = m_statBytes.exchange(0);
+                std::cerr << "[WebRtcFrameSink] stats fps=" << (frames / elapsed)
+                          << " mbps=" << (bytes * 8.0 / elapsed / 1e6)
+                          << " frames=" << frames << std::endl;
+                m_statWindow = now;
+            }
+        } else {
+            std::cerr << "[WebRtcFrameSink] sent " << nalUnits.size() << " bytes" << std::endl;
+        }
     } catch (const std::exception& error) {
         std::cerr << "[WebRtcFrameSink] send failed: " << error.what() << std::endl;
     }

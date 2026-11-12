@@ -1,6 +1,8 @@
 #ifndef AV_STREAMING_WEBRTCFRAMESINK_H
 #define AV_STREAMING_WEBRTCFRAMESINK_H
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -35,6 +37,13 @@ private:
     std::mutex m_mutex;
     std::unique_ptr<IVideoEncoder> m_encoder;
     bool m_opened{false};
+
+    // Optional throughput stats (AVPLAYER_STREAM_STATS=1) so benchmarks report
+    // what the server actually pushed instead of inferring it from logs.
+    bool m_stats{false};
+    std::atomic<uint64_t> m_statFrames{0};
+    std::atomic<uint64_t> m_statBytes{0};
+    std::chrono::steady_clock::time_point m_statWindow{};
 };
 
 }

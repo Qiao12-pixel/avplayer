@@ -9,6 +9,7 @@ AVPlayer 是一套 **C++17 + Qt + FFmpeg + OpenGL** 的音视频播放与流媒�
 
 桌面端与服务端通过 `avplayer.agent.v1` gRPC 契约通信，媒体面（WebRTC）与控制面（gRPC/HTTP）分离——音视频不经过网关。各部署单元职责见下文“项目结构与数据流”。
 <img width="1440" height="932" alt="image" src="https://github.com/user-attachments/assets/77833f4a-5ed4-46df-89e2-33adb9c060b3" />
+<img width="1509" height="757" alt="image" src="https://github.com/user-attachments/assets/4c241aa5-2a7d-414a-bd21-0c49dfe4afbb" />
 
 
 # ✨ 核心功能

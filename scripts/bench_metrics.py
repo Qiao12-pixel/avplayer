@@ -81,6 +81,7 @@ def stream(binary: Path, server: str, session: str, media_id: str, seconds: int)
                 metrics[key] = float(raw)
             except ValueError:
                 metrics[key] = raw
+    metrics["exit_code"] = process.returncode
     metrics["stderr_tail"] = process.stderr.strip().splitlines()[-5:]
     return metrics
 
@@ -198,7 +199,7 @@ def main() -> int:
           f"= {upload_stats['upload_mb_s']:.1f} MB/s", flush=True)
 
     binary = ROOT / "cmake-build-debug" / "services" / "media" / "streaming_smoke_client"
-    media_pid = listening_pid(50062)
+    media_pid = listening_pid(int(args.media_server.rsplit(":", 1)[1]))
     rss_before = rss_mb(media_pid) if media_pid else 0.0
 
     # Control latency needs a live session; sample it while the client streams.

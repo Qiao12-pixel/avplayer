@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .db import database
+from .result_store import get_result, put_result
 from .runtime import AgentRuntime
 from .storage import SessionStorage
 from .mcp_client import LIGHT_TOOLS, HEAVY_TASKS, call_tool, run_task, model_tools
@@ -32,6 +33,7 @@ class SessionState:
         self.runtime = AgentRuntime(output=None, model=shared_ollama.model_for(session_id),
                                      tool_executor=self._execute_tool, sink=self.publish)
         self.runtime.external_tools = model_tools
+        self.runtime.result_store = self._result_operation
 
     def attach(self) -> "queue.Queue[Any]":
         """Register this connection as a reader of the session stream.
@@ -67,14 +69,26 @@ class SessionState:
         for target in targets:
             target.put(message)
 
-    def _execute_tool(self, tool: str, arguments: dict[str, Any], session_id: str) -> dict[str, Any]:
-        if self.active_media_id is None:
-            return {"success": False, "error": "尚未上传媒体文件；请先调用 UploadMedia。"}
-        # Snapshot identity now; later uploads must not redirect this submitted job.
+    def _bind_task_media(self):
         request_id = getattr(self.runtime, "_active_request_id", "")
         if request_id and getattr(self._execution, "request_id", None) != request_id:
             self._execution.request_id = request_id
             self._execution.media_id = self.active_media_id
+
+    def _result_operation(self, action, task, payload=None, variant=''):
+        self._bind_task_media()
+        media_id = getattr(self._execution, "media_id", self.active_media_id)
+        if not media_id:
+            return None
+        if action == 'get':
+            return get_result(self.session_id, media_id, task, variant)
+        return put_result(self.session_id, media_id, task, payload, variant)
+
+    def _execute_tool(self, tool: str, arguments: dict[str, Any], session_id: str) -> dict[str, Any]:
+        if self.active_media_id is None:
+            return {"success": False, "error": "尚未上传媒体文件；请先调用 UploadMedia。"}
+        self._bind_task_media()
+        request_id = getattr(self.runtime, "_active_request_id", "")
         media_id = getattr(self._execution, "media_id", self.active_media_id) if request_id else self.active_media_id
         if tool in HEAVY_TASKS:
             def progress(job_id, state, worker):

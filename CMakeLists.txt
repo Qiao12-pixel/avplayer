@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.23)
 project(AVPlayer VERSION 0.2.0 LANGUAGES C CXX)
+include(CTest)
 
 # ---------------------------------------------------------------------------
 # Toolchain / global settings
@@ -185,12 +186,11 @@ find_package(glfw3 REQUIRED)
 add_subdirectory(proto)
 add_subdirectory(libs/media-core)
 
-# media_server is independently buildable from services/media; in the
-# top-level build both its executable and the smoke client are available.
+# Internal media library is linked into avplayer_server; smoke receiver is optional.
 option(AVPLAYER_BUILD_STREAMING_SMOKE_CLIENT
     "Build the standalone WebRTC receive smoke client" ON)
 add_subdirectory(services/media)
 
 add_subdirectory(apps/desktop)
 
-add_subdirectory(services/gateway)
+add_subdirectory(services/server)

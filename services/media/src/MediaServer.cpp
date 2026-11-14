@@ -105,16 +105,4 @@ grpc::Status StreamingServiceImpl::Control(grpc::ServerContext* context,
     return grpc::Status::OK;
 }
 
-std::unique_ptr<grpc::Server> StartMediaServer(const std::string& address, const std::string& storageRoot) {
-    // Leaked intentionally: the service must outlive the grpc::Server, and
-    // this process only ever starts one media_server for its lifetime.
-    auto* service = new StreamingServiceImpl(storageRoot);
-    grpc::ServerBuilder builder;
-    builder.AddListeningPort(address, grpc::InsecureServerCredentials());
-    builder.RegisterService(service);
-    std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
-    if (server) std::cout << "[media_server] listening on " << address << std::endl;
-    return server;
-}
-
 }

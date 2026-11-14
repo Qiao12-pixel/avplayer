@@ -190,7 +190,12 @@ const sessionInput = $<HTMLInputElement>('session');
 const providerSelects = [$<HTMLSelectElement>('ai-provider'), $<HTMLSelectElement>('agent-provider')];
 const fileInput = $<HTMLInputElement>('file');
 
-const WEB_SESSION = 'web';
+// One identity per page instance, including duplicated tabs. Do not store it in
+// localStorage/sessionStorage: duplicated tabs can inherit those values.
+const sessionBytes = crypto.getRandomValues(new Uint8Array(16));
+const WEB_SESSION = `web-${Array.from(sessionBytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+sessionInput.value = WEB_SESSION;
+sessionInput.readOnly = true;
 let selectedFile: File | null = null;
 let uploadedFile: File | null = null;
 let uploading = false;
@@ -619,9 +624,18 @@ async function connect() {
     log(`信令 WebSocket 错误：${location.host}`);
     setError('无法连接 Web 网关，请确认服务已启动。');
   };
+  const currentSignalSocket = signalSocket;
   signalSocket.onclose = (event) => {
+    if (signalSocket !== currentSignalSocket) return;
     log(`信令已关闭（code=${event.code}）。`);
-    if (connected) setConnection('error', '信令已关闭');
+    if (signalSocket?.readyState !== WebSocket.CLOSED) return;
+    connected = false;
+    stopStatusPolling();
+    peer?.close();
+    peer = undefined;
+    setConnection('error', '连接已断开');
+    setError(`信令连接已关闭（${event.code}），请确认统一后端 avplayer_server 已启动，然后重试。`);
+    updateButtons();
   };
 }
 
@@ -809,6 +823,13 @@ function handleTaskResult(message: AgentMessage) {
   const payload = message.payload ?? {};
   const task = String(payload.task ?? '');
   const success = Boolean(payload.success);
+  if (payload.cached) log('已复用当前媒体的已保存结果。');
+  const persistence = payload.persistence as { mysql_saved?: boolean; redis_cached?: boolean } | undefined;
+  if (success && persistence) {
+    if (persistence.mysql_saved) log('处理结果已保存到 MySQL。');
+    else log('结果已生成，但 MySQL 持久化未成功，请检查后端数据库连接。');
+    if (!persistence.redis_cached) log('Redis 缓存未写入，后续请求将尝试读取数据库。');
+  }
   if (!success) {
     const error = String(payload.error ?? '任务失败');
     $('ai-result').textContent = error;

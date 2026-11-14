@@ -44,3 +44,6 @@ deploy/.env
 
 # Generated gRPC stubs are committed for installability; regenerate with
 # scripts/gen_proto.sh after proto/agent.proto changes.
+
+# Local build tooling virtual environments
+.tools/

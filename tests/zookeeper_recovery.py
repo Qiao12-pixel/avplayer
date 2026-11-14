@@ -62,8 +62,7 @@ def main():
                  AVPLAYER_WEB_GATEWAY_PORT='50565',AVPLAYER_STORAGE_ROOT=str(path/'storage'),AVPLAYER_MYSQL_DSN='',AVPLAYER_REDIS_URL='')
         try:
             zk=start_zk()
-            launch([str(build/'services/media/media_server')],env,name='media')
-            launch([str(build/'services/gateway/web_gateway')],env,name='gateway')
+            launch([str(build/'services/server/avplayer_server')],env,name='gateway')
             wait(lambda:health()['backends']==['127.0.0.1:50562'])
             clip=ROOT/'resource/bench-1080p60.mp4'
             folder=path/'storage'/'recovery'/'video';folder.mkdir(parents=True);os.link(clip,folder/'original.mp4')

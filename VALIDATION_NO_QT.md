@@ -1,3 +1,5 @@
+> 当前已合并：只启动一个 C++ `avplayer_server`（网络、数据、媒体同进程）；`services/media` 仅为内部库，旧 `web_gateway` / `media_server` 程序不再使用。
+
 # 非Qt全项目验证（2026-11-14）
 
 本轮没有构建或启动Qt客户端。环境：Apple M5、macOS、本机服务、Debug C++构建，使用本地Qwen3:4b与Whisper。

@@ -52,7 +52,7 @@ async def test():
   async with session.get('http://localhost:50365/download?session_id=x&media_id=x&file=../../../../etc/passwd') as r:assert r.status==404
   print('ALL MIGRATION CHECKS PASSED',flush=True)
 try:
- for name,cmd in [('agent',['.venv/bin/python','-m','avplayer_agent']),('gateway',['cmake-build-debug/services/gateway/web_gateway']),('media',['cmake-build-debug/services/media/media_server'])]:
+ for name,cmd in [('agent',['.venv/bin/python','-m','avplayer_agent']),('gateway',['cmake-build-debug/services/server/avplayer_server'])]:
   ps.append(subprocess.Popen(cmd,env=env,stdout=open('/tmp/cpp-migration-'+name+'.log','w'),stderr=subprocess.STDOUT))
  time.sleep(3);asyncio.run(test())
 finally:

@@ -1,4 +1,6 @@
-> 网络与数据层已迁移：HTTP/WebSocket、上传及 Redis/MySQL 由 [C++ gateway](services/gateway/README.md) 唯一提供。Python Agent 保留智能体编排和内部 gRPC；上传/存储端口为 50066，Agent 端口为 50061。下文历史架构细节以 gateway 说明为准。
+> 当前已合并：只启动一个 C++ `avplayer_server`（网络、数据、媒体同进程）；`services/media` 仅为内部库，旧 `web_gateway` / `media_server` 程序不再使用。
+
+> 网络与数据层已迁移：HTTP/WebSocket、上传及 Redis/MySQL 由 [C++ gateway](services/server/README.md) 唯一提供。Python Agent 保留智能体编排和内部 gRPC；上传/存储端口为 50066，Agent 端口为 50061。下文历史架构细节以 gateway 说明为准。
 
 # 📋 项目简介
 
@@ -56,7 +58,7 @@ AVPlayer 是一套 **C++17 + Qt + FFmpeg + OpenGL** 的音视频播放与流媒�
 依赖和 C++/Python/Web 构建准备好后，最短启动路径是：
 
 ```sh
-scripts/dev.sh                 # agent + gateway + media_server + Vite
+scripts/dev.sh                 # agent + avplayer_server + MCP + Vite
 ```
 
 另开一个终端启动 Qt 桌面端：
@@ -160,8 +162,8 @@ AVPlayer/
 | `apps/desktop` | `AVPlayer` | `libs/media-core` + `proto`；通过 gRPC 连接 `services/agent` 与 `services/media` |
 | `apps/web` | Vite/nginx | HTTP/WebSocket 到 `services/agent` 的 Web 网关 |
 | `services/agent` | `avplayer-agent` | Python 智能体编排，经内部 gRPC 访问 C++ 数据服务 |
-| `services/gateway` | `web_gateway` | C++ Asio/Beast；HTTP/WS、上传、Redis/MySQL |
-| `services/media` | `media_server` | `libs/media-core` + `proto`；不构建、不链接 Qt 桌面应用 |
+| `services/server` | `avplayer_server` | 统一网络、数据、媒体后端入口 |
+| `services/media` | 内部静态库 | 由avplayer_server链接，承担WebRTC媒体与录制 |
 | `libs/media-core` | 静态库 | 仅媒体解码/同步/帧类型/录制编码，不含桌面 UI |
 | `proto` | `avplayer_proto` 静态库 | 两个 C++ 部署单元共享的 gRPC 契约 |
 
@@ -433,3 +435,5 @@ MCP已作为普通源码目录纳入 `thirdParty/MCP`。首次安装依赖可运
 构建产物位于 `build/mcp`，`scripts/dev.sh` 默认启动仓库内版本。来源与集成边界见 `thirdParty/MCP/UPSTREAM.md`。
 
 MCP为普通源码目录，随AVPlayer仓库一起拉取和提交；执行scripts/build_mcp.sh构建，不需要子模块初始化。
+
+后端ZooKeeper实现已归入services/server/src/discovery/zookeeper；整体结构见[ARCHITECTURE.md](ARCHITECTURE.md)，从依赖构建到启动见[STARTUP.md](STARTUP.md)。

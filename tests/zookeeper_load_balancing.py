@@ -69,7 +69,7 @@ def main():
                     AVPLAYER_DATA_SERVER_ADDRESS='127.0.0.1:50466',
                     AVPLAYER_MYSQL_DSN='', AVPLAYER_REDIS_URL='')
         try:
-            start(BUILD/'services/gateway/web_gateway', base, folder/'gateway.log')
+            start(BUILD/'services/server/avplayer_server', dict(base, AVPLAYER_MEDIA_SERVER_ADDRESS='127.0.0.1:50460', AVPLAYER_MEDIA_ADVERTISE='127.0.0.1:50460', AVPLAYER_SERVER_REGISTER='0'), folder/'gateway.log')
             wait(lambda: health())
             channel = grpc.insecure_channel('127.0.0.1:50466')
             stub = rpc.StreamingServiceStub(channel)
@@ -79,12 +79,11 @@ def main():
                     raise AssertionError('empty registry must reject')
                 except grpc.RpcError as e:
                     assert e.code() == grpc.StatusCode.UNAVAILABLE, e
-            reject()
             medias=[]
             for port in [50462,50463]:
                 env = dict(base, AVPLAYER_MEDIA_SERVER_ADDRESS=f'127.0.0.1:{port}',
-                           AVPLAYER_MEDIA_ADVERTISE=f'127.0.0.1:{port}')
-                medias.append(start(BUILD/'services/media/media_server',env,folder/f'media-{port}.log'))
+                           AVPLAYER_MEDIA_ADVERTISE=f'127.0.0.1:{port}', AVPLAYER_WEB_GATEWAY_PORT=str(port+100), AVPLAYER_DATA_SERVER_ADDRESS=f'127.0.0.1:{port+200}', AVPLAYER_DATA_SERVER=f'127.0.0.1:{port+200}')
+                medias.append(start(BUILD/'services/server/avplayer_server',env,folder/f'media-{port}.log'))
             wait(lambda: len(health()['backends']) == 2)
             clip = ROOT/'resource/bench-720p60.mp4'
             if not clip.exists():
@@ -136,8 +135,8 @@ def main():
             print('PASS: SIGKILL + ephemeral expiry, new stream uses survivor',flush=True)
             stop(medias[1]);wait(lambda: not health()['backends']);reject()
             print('PASS: no backend returns UNAVAILABLE; no random fallback',flush=True)
-            env=dict(base,AVPLAYER_MEDIA_SERVER_ADDRESS='127.0.0.1:50462',AVPLAYER_MEDIA_ADVERTISE='127.0.0.1:50462')
-            start(BUILD/'services/media/media_server',env,folder/'media-restart.log')
+            env=dict(base,AVPLAYER_MEDIA_SERVER_ADDRESS='127.0.0.1:50462',AVPLAYER_MEDIA_ADVERTISE='127.0.0.1:50462', AVPLAYER_WEB_GATEWAY_PORT='50562', AVPLAYER_DATA_SERVER_ADDRESS='127.0.0.1:50662', AVPLAYER_DATA_SERVER='127.0.0.1:50662')
+            start(BUILD/'services/server/avplayer_server',env,folder/'media-restart.log')
             wait(lambda: health()['backends']==['127.0.0.1:50462'])
             p = client(5, 3)
             wait(lambda: health()['sessions'])
@@ -151,7 +150,7 @@ def main():
             ack = stub.Control(pb.ControlRequest(session_id='lb-0',media_id='video',action='status'), timeout=5)
             wait(lambda: stub.Control(pb.ControlRequest(session_id='lb-0',media_id='video',action='status'),timeout=5).success)
             for process in PROCESSES:
-                if process.args == [str(BUILD/'services/media/media_server')] and process.poll() is None:
+                if process != PROCESSES[0] and process.args == [str(BUILD/'services/server/avplayer_server')] and process.poll() is None:
                     stop(process)
             wait(lambda: not health()['sessions'])
             ack = stub.Control(pb.ControlRequest(session_id='lb-0',media_id='video',action='status'), timeout=5)

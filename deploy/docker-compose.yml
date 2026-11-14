@@ -18,10 +18,10 @@ services:
       AVPLAYER_AGENT_BIND: 0.0.0.0
       AVPLAYER_AGENT_PORT: "50061"
       AVPLAYER_MCP_URL: ${AVPLAYER_MCP_URL:-http://host.docker.internal:8081/jsonrpc}
-      AVPLAYER_MEDIA_SERVER: media:50062
+      AVPLAYER_MEDIA_SERVER: server:50062
       AVPLAYER_AI_PROVIDER: ${AVPLAYER_AI_PROVIDER:-cloud}
       AVPLAYER_OLLAMA_HOST: ${AVPLAYER_OLLAMA_HOST:-http://ollama:11434}
-      AVPLAYER_DATA_SERVER: web-gateway:50066
+      AVPLAYER_DATA_SERVER: server:50066
     ports:
       - "${AVPLAYER_AGENT_PORT:-50061}:50061"
     volumes:
@@ -68,52 +68,35 @@ services:
       - "${AVPLAYER_ZK_PORT:-2181}:2181"
     restart: unless-stopped
 
-  media:
+  server:
     build:
       context: ..
-      dockerfile: deploy/media.Dockerfile
-    image: avplayer-media:local
+      dockerfile: deploy/server.Dockerfile
+    image: avplayer-server:local
     environment:
-      AVPLAYER_ZK_HOSTS: ${AVPLAYER_ZK_HOSTS:-}
-      AVPLAYER_ZK_MEDIA_PATH: ${AVPLAYER_ZK_MEDIA_PATH:-/avplayer/media}
-      AVPLAYER_MEDIA_SERVER_ADDRESS: 0.0.0.0:50062
-      AVPLAYER_MEDIA_ADVERTISE: ${AVPLAYER_MEDIA_ADVERTISE:-media:50062}
-      AVPLAYER_STORAGE_ROOT: /data/storage
-      AVPLAYER_ICE_SERVERS: ${AVPLAYER_ICE_SERVERS:-stun:stun.l.google.com:19302}
-    ports:
-      - "${AVPLAYER_MEDIA_SERVER_PORT:-50062}:50062"
-    volumes:
-      - ${AVPLAYER_STORAGE_DIR:-../storage}:/data/storage
-    restart: unless-stopped
-
-  web-gateway:
-    build:
-      context: ..
-      dockerfile: deploy/gateway.Dockerfile
-    image: avplayer-gateway:local
-    command: ["web_gateway"]
-    environment:
-      AVPLAYER_ZK_HOSTS: ${AVPLAYER_ZK_HOSTS:-}
-      AVPLAYER_ZK_MEDIA_PATH: ${AVPLAYER_ZK_MEDIA_PATH:-/avplayer/media}
       AVPLAYER_PROJECT_ROOT: /app
       AVPLAYER_STORAGE_ROOT: /data/storage
-      AVPLAYER_DATA_SERVER_ADDRESS: 0.0.0.0:50066
-      AVPLAYER_REDIS_URL: redis://redis:6379/0
-      AVPLAYER_MYSQL_DSN: mysql://avplayer:${AVPLAYER_MYSQL_PASSWORD:-avplayer}@mysql:3306/avplayer
       AVPLAYER_AGENT_SERVER: agent:50061
-      AVPLAYER_MEDIA_SERVER: media:50062
+      AVPLAYER_DATA_SERVER: localhost:50066
+      AVPLAYER_DATA_SERVER_ADDRESS: 0.0.0.0:50066
+      AVPLAYER_MEDIA_SERVER_ADDRESS: 0.0.0.0:50062
       AVPLAYER_WEB_GATEWAY_HOST: 0.0.0.0
       AVPLAYER_WEB_GATEWAY_PORT: "50065"
+      AVPLAYER_MEDIA_ADVERTISE: ${AVPLAYER_MEDIA_ADVERTISE:-server:50062}
+      AVPLAYER_ZK_HOSTS: ${AVPLAYER_ZK_HOSTS:-}
+      AVPLAYER_ZK_MEDIA_PATH: ${AVPLAYER_ZK_MEDIA_PATH:-/avplayer/media}
+      AVPLAYER_REDIS_URL: redis://redis:6379/0
+      AVPLAYER_MYSQL_DSN: mysql://avplayer:${AVPLAYER_MYSQL_PASSWORD:-avplayer}@mysql:3306/avplayer
       AVPLAYER_ICE_SERVERS: ${AVPLAYER_ICE_SERVERS:-stun:stun.l.google.com:19302}
     ports:
       - "${AVPLAYER_WEB_GATEWAY_PORT:-50065}:50065"
       - "${AVPLAYER_DATA_PORT:-50066}:50066"
+      - "${AVPLAYER_MEDIA_SERVER_PORT:-50062}:50062"
     volumes:
       - ${AVPLAYER_STORAGE_DIR:-../storage}:/data/storage
     depends_on:
       - redis
       - mysql
-      - media
     restart: unless-stopped
 
   web:
@@ -124,7 +107,7 @@ services:
     ports:
       - "${AVPLAYER_WEB_PORT:-8080}:80"
     depends_on:
-      - web-gateway
+      - server
     restart: unless-stopped
 
   # Optional local-model backend. Pull a model once:

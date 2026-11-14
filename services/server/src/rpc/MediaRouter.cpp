@@ -12,6 +12,8 @@ std::string MediaRouter::key(const std::string &s, const std::string &m) const {
 grpc::Status MediaRouter::Signal(
     grpc::ServerContext *server,
     grpc::ServerReaderWriter<api::SignalMessage, api::SignalMessage> *stream) {
+  if (!registry.enabled())
+    return local.Signal(server, stream);
   api::SignalMessage first;
   if (!stream->Read(&first) || first.kind() != "offer" ||
       first.session_id().empty() || first.media_id().empty())
@@ -33,21 +35,10 @@ grpc::Status MediaRouter::Signal(
     if (routes.count(routeKey))
       return {grpc::StatusCode::ALREADY_EXISTS,
               "playback session already active"};
-    size_t minimum = routes.size() + 1;
-    std::vector<std::string> candidates;
-    for (auto &e : endpoints) {
-      size_t count = 0;
-      for (auto &r : routes)
-        if (r.second.endpoint == e)
-          ++count;
-      if (count < minimum) {
-        minimum = count;
-        candidates.clear();
-      }
-      if (count == minimum)
-        candidates.push_back(e);
-    }
-    endpoint = candidates[tie++ % candidates.size()];
+    std::map<std::string, size_t> counts;
+    for (const auto &route : routes)
+      ++counts[route.second.endpoint];
+    endpoint = policy.Select(endpoints, counts);
     token = ++sequence;
     routes.emplace(routeKey, Route{endpoint, token});
   }
@@ -115,6 +106,8 @@ grpc::Status MediaRouter::Signal(
 grpc::Status MediaRouter::Control(grpc::ServerContext *server,
                                   const api::ControlRequest *request,
                                   api::ControlAck *response) {
+  if (!registry.enabled())
+    return local.Control(server, request, response);
   std::string endpoint;
   {
     std::lock_guard<std::mutex> lock(mutex);

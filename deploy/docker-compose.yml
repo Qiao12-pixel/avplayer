@@ -10,16 +10,18 @@ services:
       context: ..
       dockerfile: deploy/agent.Dockerfile
     image: avplayer-agent:local
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       AVPLAYER_PROJECT_ROOT: /app
       AVPLAYER_STORAGE_ROOT: /data/storage
       AVPLAYER_AGENT_BIND: 0.0.0.0
       AVPLAYER_AGENT_PORT: "50061"
+      AVPLAYER_MCP_URL: ${AVPLAYER_MCP_URL:-http://host.docker.internal:8081/jsonrpc}
       AVPLAYER_MEDIA_SERVER: media:50062
       AVPLAYER_AI_PROVIDER: ${AVPLAYER_AI_PROVIDER:-cloud}
       AVPLAYER_OLLAMA_HOST: ${AVPLAYER_OLLAMA_HOST:-http://ollama:11434}
-      AVPLAYER_REDIS_URL: ${AVPLAYER_REDIS_URL:-redis://redis:6379/0}
-      AVPLAYER_MYSQL_DSN: ${AVPLAYER_MYSQL_DSN:-mysql://avplayer:avplayer@mysql:3306/avplayer?charset=utf8mb4}
+      AVPLAYER_DATA_SERVER: web-gateway:50066
     ports:
       - "${AVPLAYER_AGENT_PORT:-50061}:50061"
     volumes:
@@ -55,9 +57,16 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
     restart: unless-stopped
-    depends_on:
-      - redis
-      - mysql
+
+  zookeeper:
+    profiles: ["discovery"]
+    image: zookeeper:3.9.3
+    environment:
+      ZOO_STANDALONE_ENABLED: "true"
+      ZOO_ADMINSERVER_ENABLED: "false"
+    ports:
+      - "${AVPLAYER_ZK_PORT:-2181}:2181"
+    restart: unless-stopped
 
   media:
     build:
@@ -65,7 +74,10 @@ services:
       dockerfile: deploy/media.Dockerfile
     image: avplayer-media:local
     environment:
+      AVPLAYER_ZK_HOSTS: ${AVPLAYER_ZK_HOSTS:-}
+      AVPLAYER_ZK_MEDIA_PATH: ${AVPLAYER_ZK_MEDIA_PATH:-/avplayer/media}
       AVPLAYER_MEDIA_SERVER_ADDRESS: 0.0.0.0:50062
+      AVPLAYER_MEDIA_ADVERTISE: ${AVPLAYER_MEDIA_ADVERTISE:-media:50062}
       AVPLAYER_STORAGE_ROOT: /data/storage
       AVPLAYER_ICE_SERVERS: ${AVPLAYER_ICE_SERVERS:-stun:stun.l.google.com:19302}
     ports:
@@ -77,11 +89,17 @@ services:
   web-gateway:
     build:
       context: ..
-      dockerfile: deploy/agent.Dockerfile
-    image: avplayer-agent:local
-    command: ["avplayer-web-gateway"]
+      dockerfile: deploy/gateway.Dockerfile
+    image: avplayer-gateway:local
+    command: ["web_gateway"]
     environment:
+      AVPLAYER_ZK_HOSTS: ${AVPLAYER_ZK_HOSTS:-}
+      AVPLAYER_ZK_MEDIA_PATH: ${AVPLAYER_ZK_MEDIA_PATH:-/avplayer/media}
       AVPLAYER_PROJECT_ROOT: /app
+      AVPLAYER_STORAGE_ROOT: /data/storage
+      AVPLAYER_DATA_SERVER_ADDRESS: 0.0.0.0:50066
+      AVPLAYER_REDIS_URL: redis://redis:6379/0
+      AVPLAYER_MYSQL_DSN: mysql://avplayer:${AVPLAYER_MYSQL_PASSWORD:-avplayer}@mysql:3306/avplayer
       AVPLAYER_AGENT_SERVER: agent:50061
       AVPLAYER_MEDIA_SERVER: media:50062
       AVPLAYER_WEB_GATEWAY_HOST: 0.0.0.0
@@ -89,9 +107,12 @@ services:
       AVPLAYER_ICE_SERVERS: ${AVPLAYER_ICE_SERVERS:-stun:stun.l.google.com:19302}
     ports:
       - "${AVPLAYER_WEB_GATEWAY_PORT:-50065}:50065"
+      - "${AVPLAYER_DATA_PORT:-50066}:50066"
+    volumes:
+      - ${AVPLAYER_STORAGE_DIR:-../storage}:/data/storage
     depends_on:
-      - agent
       - redis
+      - mysql
       - media
     restart: unless-stopped
 

@@ -20,16 +20,30 @@ export AVPLAYER_ICE_SERVERS="${AVPLAYER_ICE_SERVERS:-stun:stun.l.google.com:1930
 export AVPLAYER_REDIS_URL="${AVPLAYER_REDIS_URL:-redis://127.0.0.1:6379/0}"
 # Optional durable store (see STARTUP.md 3.5); empty disables MySQL.
 export AVPLAYER_MYSQL_DSN="${AVPLAYER_MYSQL_DSN:-mysql://avplayer:avplayer@127.0.0.1:3306/avplayer}"
+export AVPLAYER_ZK_HOSTS="${AVPLAYER_ZK_HOSTS:-}"
+export AVPLAYER_ZK_MEDIA_PATH="${AVPLAYER_ZK_MEDIA_PATH:-/avplayer/media}"
+export AVPLAYER_MEDIA_ADVERTISE="${AVPLAYER_MEDIA_ADVERTISE:-127.0.0.1:${AVPLAYER_MEDIA_SERVER_ADDRESS##*:}}"
+export AVPLAYER_DATA_SERVER="${AVPLAYER_DATA_SERVER:-localhost:50066}"
+export AVPLAYER_DATA_SERVER_ADDRESS="${AVPLAYER_DATA_SERVER_ADDRESS:-127.0.0.1:50066}"
+export AVPLAYER_WORKER_PYTHON="${AVPLAYER_WORKER_PYTHON:-$PYTHON}"
+export AVPLAYER_MCP_ROOT="${AVPLAYER_MCP_ROOT:-$ROOT/thirdParty/MCP}"
+export AVPLAYER_MCP_BUILD_DIR="${AVPLAYER_MCP_BUILD_DIR:-$ROOT/build/mcp}"
+export AVPLAYER_MCP_BIN="${AVPLAYER_MCP_BIN:-$AVPLAYER_MCP_BUILD_DIR/MCP_Server}"
+export MCP_MEDIA_ROOT="${MCP_MEDIA_ROOT:-$AVPLAYER_MCP_ROOT}"
+export AVPLAYER_MCP_PORT="${AVPLAYER_MCP_PORT:-8081}"
+export AVPLAYER_MCP_URL="${AVPLAYER_MCP_URL:-http://127.0.0.1:$AVPLAYER_MCP_PORT/jsonrpc}"
 export PYTHONPATH="$ROOT/services/agent${PYTHONPATH:+:$PYTHONPATH}"
 
+WITH_MCP=1
 WITH_MEDIA=1
 WITH_WEB=1
 for arg in "$@"; do
   case "$arg" in
+    --no-mcp) WITH_MCP=0 ;;
     --no-media) WITH_MEDIA=0 ;;
     --no-web) WITH_WEB=0 ;;
     -h|--help)
-      echo "Usage: $0 [--no-media] [--no-web]"
+      echo "Usage: $0 [--no-media] [--no-web] [--no-mcp]"
       exit 0
       ;;
     *)
@@ -61,7 +75,9 @@ check_ports() {
     fi
   done <<EOF
 $AVPLAYER_AGENT_PORT agent
+$([[ "$WITH_MCP" == "1" ]] && echo "$AVPLAYER_MCP_PORT mcp")
 $AVPLAYER_WEB_GATEWAY_PORT gateway
+${AVPLAYER_DATA_SERVER_ADDRESS##*:} data
 $([[ "$WITH_MEDIA" == "1" ]] && echo "${AVPLAYER_MEDIA_SERVER_ADDRESS##*:} media")
 $([[ "$WITH_WEB" == "1" ]] && echo "5173 web")
 EOF
@@ -74,6 +90,16 @@ EOF
   fi
 }
 
+GATEWAY_BIN="${AVPLAYER_GATEWAY_BIN:-$BUILD_DIR/services/gateway/web_gateway}"
+if [[ ! -x "$GATEWAY_BIN" ]]; then
+  echo "C++ gateway not built: $GATEWAY_BIN" >&2
+  echo "cmake --build $BUILD_DIR --target web_gateway" >&2
+  exit 1
+fi
+if [[ "$WITH_MCP" == "1" && ! -x "$AVPLAYER_MCP_BIN" ]]; then
+  echo "MCP binary not built; run scripts/build_mcp.sh or use --no-mcp for an external server" >&2
+  exit 1
+fi
 check_ports
 
 PIDS=""
@@ -85,13 +111,25 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+if [[ "$WITH_MCP" == "1" ]]; then
+  mkdir -p "$ROOT/cache/mcp"
+  MCP_CONFIG="${AVPLAYER_MCP_CONFIG:-$AVPLAYER_MCP_ROOT/config/server.json}"
+  if [[ ! -f "$MCP_CONFIG" ]]; then
+    echo "MCP configuration not found: $MCP_CONFIG" >&2
+    exit 1
+  fi
+  (cd "$ROOT/cache/mcp" && exec "$AVPLAYER_MCP_BIN" --config "$MCP_CONFIG" --host 127.0.0.1 --port "$AVPLAYER_MCP_PORT") &
+  PIDS="$PIDS $!"
+fi
+
 echo "agent    127.0.0.1:${AVPLAYER_AGENT_PORT}"
 "$PYTHON" -m avplayer_agent &
 PIDS="$PIDS $!"
 
 echo "gateway  127.0.0.1:${AVPLAYER_WEB_GATEWAY_PORT} -> ${AVPLAYER_MEDIA_SERVER}"
-"$PYTHON" -m avplayer_agent.web_gateway &
+"$GATEWAY_BIN" &
 PIDS="$PIDS $!"
+
 
 if [[ "$WITH_MEDIA" == "1" ]]; then
   MEDIA_BIN="$BUILD_DIR/services/media/media_server"

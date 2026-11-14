@@ -111,7 +111,7 @@ public:
     AgentBridgeWorker(AgentBridge* owner, std::shared_ptr<grpc::Channel> channel)
         : m_owner(owner), m_channel(std::move(channel)),
           m_agentStub(AgentService::NewStub(m_channel)),
-          m_mediaStub(MediaService::NewStub(m_channel)) {}
+          m_mediaStub(MediaService::NewStub(grpc::CreateChannel(qEnvironmentVariable("AVPLAYER_DATA_SERVER", "localhost:50066").toStdString(), grpc::InsecureChannelCredentials()))) {}
 
     ~AgentBridgeWorker() { Stop(); }
 
@@ -216,7 +216,8 @@ bool AgentBridge::IsRunning() const { return m_worker && m_worker->IsRunning(); 
 
 bool AgentBridge::UploadMediaToServer(const QString& serverAddress, const QString& filePath,
                                       const QString& sessionId, QString* mediaId, QString* error) {
-    auto channel = grpc::CreateChannel(serverAddress.toStdString(), grpc::InsecureChannelCredentials());
+    auto channel = grpc::CreateChannel(qEnvironmentVariable("AVPLAYER_DATA_SERVER", "localhost:50066").toStdString(), grpc::InsecureChannelCredentials());
+    Q_UNUSED(serverAddress);
     auto stub = MediaService::NewStub(channel);
     return UploadMediaWithStub(*stub, filePath, sessionId, mediaId, error);
 }

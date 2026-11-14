@@ -2,10 +2,10 @@ import { defineConfig } from 'vite';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 
 export default defineConfig({
-  plugins: [basicSsl()],
+  plugins: process.env.AVPLAYER_WEB_HTTP === "1" ? [] : [basicSsl()],
   server: {
     host: '0.0.0.0',
-    https: true,
+    https: process.env.AVPLAYER_WEB_HTTP === "1" ? undefined : {},
     proxy: {
       '/signal': {
         target: process.env.AVPLAYER_WEB_GATEWAY_HTTP ?? 'http://127.0.0.1:50065',

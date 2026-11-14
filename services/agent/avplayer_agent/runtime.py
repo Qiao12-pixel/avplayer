@@ -29,6 +29,7 @@ TASK_NAMES = {
 }
 
 PYTHON_TOOLS = [
+    {"name": "transcode_video", "description": "将已上传视频转码为 H.264/AAC MP4，指定输出高度。", "input_schema": {"type": "object", "properties": {"height": {"type": "integer", "enum": [360, 480, 720, 1080]}}, "required": ["height"]}},
     {"name": "transcribe_subtitle", "description": "为当前本地视频转写音频并生成带时间戳的字幕。", "input_schema": {"type": "object", "properties": {}}},
     {"name": "summarize_video", "description": "仅依据当前视频的字幕生成摘要；需要已有字幕。", "input_schema": {"type": "object", "properties": {}}},
     {"name": "semantic_search", "description": "根据当前视频字幕查找语义相关内容。", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
@@ -38,7 +39,7 @@ PYTHON_TOOLS = [
 INTERNAL_CPP_TOOLS = {"get_transcript", "extract_audio", "save_transcript", "set_edit_plan"}
 # Tasks that are executed directly by the server-side tool executor rather
 # than by the LangGraph model loop (used by the Web client's plan export).
-SERVER_TASKS = {"export_plan"}
+SERVER_TASKS = {"export_plan", "transcode_video"}
 
 
 def _model_tool_schemas(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -102,6 +103,7 @@ class AgentRuntime:
         # (extract_audio, save_transcript, ...) directly on the server, now
         # that they are plain ffmpeg wrappers with no local-UI dependency.
         self._tool_executor = tool_executor
+        self.external_tools = None
         self.tools: list[dict[str, Any]] = []
         root = project_root()
         config_path = root / "config" / "secret_key.yaml"
@@ -410,69 +412,27 @@ class AgentRuntime:
             raise RuntimeError("请在 config/secret_key.yaml 配置 doubao_speech_api_key")
         if self.provider == "local" and not self.local_speech_configured():
             raise RuntimeError("Whisper 模型未下载或文件不完整；请运行 scripts/download_local_models.sh")
-        audio = self._require_cpp("extract_audio", {"source_path": str(source)}, session_id)
-        audio_path = Path(audio["path"])
-        try:
-            if self.provider == "cloud":
-                segments = self._transcribe_cloud(audio_path)
-            else:
-                segments = self._transcribe_local(audio_path)
-        finally:
-            audio_path.unlink(missing_ok=True)
+        result = self._require_cpp("transcribe_subtitle", {"provider": self.provider}, session_id)
+        segments = result.get("segments", [])
         if not segments:
             raise RuntimeError("语音识别未返回带时间戳的字幕。")
         saved = self._require_cpp("save_transcript", {"source_path": str(source), "segments": segments}, session_id)
         return {"success": True, "result": f"已生成 {len(segments)} 条字幕：{saved.get('path', '')}",
                 "segments": segments}
 
-    def _transcribe_local(self, audio_path: Path) -> list[dict[str, Any]]:
-        model_path = Path(str(self.local_config.get("whisper_model_path", "")))
-        if not model_path.is_absolute(): model_path = self.project_root / model_path
-        from faster_whisper import WhisperModel
-        model_config = next((config for config in model_path.rglob("config.json")
-                             if (config.parent / "model.bin").is_file()), None) if model_path.is_dir() else None
-        if model_config is not None:
-            whisper = WhisperModel(str(model_config.parent), device="auto", compute_type="int8")
-        else:
-            raise RuntimeError("Whisper 模型未下载；请运行 scripts/download_local_models.sh")
-        chunks, _ = whisper.transcribe(str(audio_path), vad_filter=True)
-        return [{"start_ms": int(chunk.start * 1000), "end_ms": int(chunk.end * 1000),
-                 "text": chunk.text.strip()} for chunk in chunks if chunk.text.strip()]
-
-    def _transcribe_cloud(self, audio_path: Path) -> list[dict[str, Any]]:
-        import base64
-        import urllib.error
-        import urllib.request
-        body = {"user": {"uid": "avplayer"},
-                "audio": {"data": base64.b64encode(audio_path.read_bytes()).decode("ascii")},
-                "request": {"model_name": "bigmodel"}}
-        request = urllib.request.Request(
-            "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash",
-            data=json.dumps(body).encode("utf-8"), method="POST",
-            headers={"Content-Type": "application/json",
-                     "X-Api-Key": str(self.config["doubao_speech_api_key"]),
-                     "X-Api-Resource-Id": "volc.bigasr.auc_turbo",
-                     "X-Api-Request-Id": str(uuid.uuid4()), "X-Api-Sequence": "-1"})
-        try:
-            with urllib.request.urlopen(request, timeout=180) as response:
-                status = response.headers.get("X-Api-Status-Code", "")
-                result = json.load(response)
-        except urllib.error.HTTPError as exc:
-            raise RuntimeError(f"豆包语音请求失败（HTTP {exc.code}）：{exc.read().decode('utf-8', 'replace')[-400:]}") from exc
-        if status != "20000000":
-            raise RuntimeError("豆包语音识别失败：" + str(result.get("message", status)))
-        return [{"start_ms": item["start_time"], "end_ms": item["end_time"], "text": item["text"]}
-                for item in result.get("result", {}).get("utterances", []) if item.get("text")]
-
     def _build_graph(self):
         if self._graph is not None:
             return self._graph
         catalog = [tool for tool in self.tools if tool.get("name") not in INTERNAL_CPP_TOOLS] + PYTHON_TOOLS
+        if self.external_tools is not None:
+            external = self.external_tools()
+            names = {tool['name'] for tool in external}
+            catalog = [tool for tool in catalog if tool['name'] not in names] + external
         schemas = _model_tool_schemas(catalog)
         model = self._model().bind_tools(schemas)
         prompt = ("你是 AVPlayer 视频 Agent。仅调用给定工具完成媒体操作。"
                   "导出片段使用 export_video：能定位到具体内容时，先查字幕时间轴，"
-                  "再传 start_ms/end_ms 导出准确区间；只有用户说“随便剪一段”时才传 duration_ms。"
+                  "再传 start_ms/end_ms 导出准确区间；只有用户说“随便剪一段”时调用 export_random_clip 并传 duration_ms。"
                   "片段时长由内容决定，不要固定 3 秒；一次任务可以多次调用导出多个片段。"
                   "用户未明确指定绝对导出目录时，不要给导出工具传 output_dir。"
                   "只有工具结果 success=true 才能宣称操作完成；失败应说明原因。"

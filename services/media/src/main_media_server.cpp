@@ -2,6 +2,8 @@
 #include <string>
 
 #include "MediaServer.h"
+#include "Registry.h"
+#include <iostream>
 
 int main() {
     std::string address = "0.0.0.0:50062";
@@ -18,6 +20,16 @@ int main() {
     if (!server) {
         return 1;
     }
+    std::string advertised;
+    if (const char* hosts = std::getenv("AVPLAYER_ZK_HOSTS"); hosts && *hosts) {
+        const char* value = std::getenv("AVPLAYER_MEDIA_ADVERTISE");
+        if (!value || !*value) {
+            std::cerr << "AVPLAYER_MEDIA_ADVERTISE=reachable-host:port is required with ZooKeeper" << std::endl;
+            return 2;
+        }
+        advertised = value;
+    }
+    av::Registry registration(advertised);
     server->Wait();
     return 0;
 }

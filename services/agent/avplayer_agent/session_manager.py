@@ -16,9 +16,9 @@ from pathlib import Path
 from typing import Any
 
 from .db import database
-from .local_tools import TOOLS
 from .runtime import AgentRuntime
 from .storage import SessionStorage
+from .mcp_client import LIGHT_TOOLS, HEAVY_TASKS, call_tool, run_task, model_tools
 
 
 class SessionState:
@@ -26,10 +26,12 @@ class SessionState:
         self.session_id = session_id
         self.storage = storage
         self.active_media_id: str | None = None
+        self._execution = threading.local()
         self._subscribers: "list[queue.Queue[Any]]" = []
         self._subscriber_lock = threading.Lock()
         self.runtime = AgentRuntime(output=None, model=shared_ollama.model_for(session_id),
                                      tool_executor=self._execute_tool, sink=self.publish)
+        self.runtime.external_tools = model_tools
 
     def attach(self) -> "queue.Queue[Any]":
         """Register this connection as a reader of the session stream.
@@ -55,7 +57,7 @@ class SessionState:
             payload = message.get("payload") or {}
             database().record_task(
                 self.session_id,
-                self.active_media_id or "",
+                getattr(self._execution, "media_id", self.active_media_id) or "",
                 str(payload.get("task", "")),
                 bool(payload.get("success")),
                 str(payload.get("result", "") or payload.get("error", "")),
@@ -66,12 +68,25 @@ class SessionState:
             target.put(message)
 
     def _execute_tool(self, tool: str, arguments: dict[str, Any], session_id: str) -> dict[str, Any]:
-        handler = TOOLS.get(tool)
-        if handler is None:
-            return {"success": False, "error": f"未知工具：{tool}"}
         if self.active_media_id is None:
             return {"success": False, "error": "尚未上传媒体文件；请先调用 UploadMedia。"}
-        return handler(self.storage, self.session_id, self.active_media_id, arguments)
+        # Snapshot identity now; later uploads must not redirect this submitted job.
+        request_id = getattr(self.runtime, "_active_request_id", "")
+        if request_id and getattr(self._execution, "request_id", None) != request_id:
+            self._execution.request_id = request_id
+            self._execution.media_id = self.active_media_id
+        media_id = getattr(self._execution, "media_id", self.active_media_id) if request_id else self.active_media_id
+        if tool in HEAVY_TASKS:
+            def progress(job_id, state, worker):
+                self.runtime._emit("status", getattr(self.runtime, "_active_request_id", ""),
+                    self.session_id, stage="worker_" + state, status="媒体任务：" + state,
+                    job_id=job_id, worker=worker)
+            return run_task(tool, self.session_id, media_id, arguments, progress,
+                            lambda: self.runtime.shutdown_requested)
+        if tool not in LIGHT_TOOLS:
+            return {"success": False, "error": f"未知工具：{tool}"}
+        return call_tool(tool, self.session_id, media_id, arguments)
+
 
 
 class SharedOllama:

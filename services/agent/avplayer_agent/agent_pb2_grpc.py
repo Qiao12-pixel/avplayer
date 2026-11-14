@@ -107,10 +107,7 @@ class MediaService:
 
 
 class AgentServiceStub:
-    """Agent orchestration: one bidirectional stream per session for the
-    avplayer.agent.v1 message envelope. Message field names mirror the payload
-    shapes produced by services/agent/avplayer_agent/protocol.py.
-    """
+    """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
         """Constructor.
@@ -118,6 +115,11 @@ class AgentServiceStub:
         Args:
             channel: A grpc.Channel.
         """
+        self.RegisterMedia = channel.unary_unary(
+                '/avplayer.agent.v1.AgentService/RegisterMedia',
+                request_serializer=agent__pb2.MediaRegistration.SerializeToString,
+                response_deserializer=agent__pb2.ControlAck.FromString,
+                _registered_method=True)
         self.Converse = channel.stream_stream(
                 '/avplayer.agent.v1.AgentService/Converse',
                 request_serializer=agent__pb2.ClientMessage.SerializeToString,
@@ -126,10 +128,13 @@ class AgentServiceStub:
 
 
 class AgentServiceServicer:
-    """Agent orchestration: one bidirectional stream per session for the
-    avplayer.agent.v1 message envelope. Message field names mirror the payload
-    shapes produced by services/agent/avplayer_agent/protocol.py.
-    """
+    """Missing associated documentation comment in .proto file."""
+
+    def RegisterMedia(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
 
     def Converse(self, request_iterator, context):
         """Missing associated documentation comment in .proto file."""
@@ -140,6 +145,11 @@ class AgentServiceServicer:
 
 def add_AgentServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
+            'RegisterMedia': grpc.unary_unary_rpc_method_handler(
+                    servicer.RegisterMedia,
+                    request_deserializer=agent__pb2.MediaRegistration.FromString,
+                    response_serializer=agent__pb2.ControlAck.SerializeToString,
+            ),
             'Converse': grpc.stream_stream_rpc_method_handler(
                     servicer.Converse,
                     request_deserializer=agent__pb2.ClientMessage.FromString,
@@ -154,10 +164,34 @@ def add_AgentServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class AgentService:
-    """Agent orchestration: one bidirectional stream per session for the
-    avplayer.agent.v1 message envelope. Message field names mirror the payload
-    shapes produced by services/agent/avplayer_agent/protocol.py.
-    """
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def RegisterMedia(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/avplayer.agent.v1.AgentService/RegisterMedia',
+            agent__pb2.MediaRegistration.SerializeToString,
+            agent__pb2.ControlAck.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
 
     @staticmethod
     def Converse(request_iterator,
@@ -307,6 +341,81 @@ class StreamingService:
             '/avplayer.agent.v1.StreamingService/Control',
             agent__pb2.ControlRequest.SerializeToString,
             agent__pb2.ControlAck.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class StorageServiceStub:
+    """Internal persistence boundary. Python orchestration never connects to stores.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Execute = channel.unary_unary(
+                '/avplayer.agent.v1.StorageService/Execute',
+                request_serializer=agent__pb2.Struct.SerializeToString,
+                response_deserializer=agent__pb2.Struct.FromString,
+                _registered_method=True)
+
+
+class StorageServiceServicer:
+    """Internal persistence boundary. Python orchestration never connects to stores.
+    """
+
+    def Execute(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_StorageServiceServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Execute': grpc.unary_unary_rpc_method_handler(
+                    servicer.Execute,
+                    request_deserializer=agent__pb2.Struct.FromString,
+                    response_serializer=agent__pb2.Struct.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'avplayer.agent.v1.StorageService', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('avplayer.agent.v1.StorageService', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class StorageService:
+    """Internal persistence boundary. Python orchestration never connects to stores.
+    """
+
+    @staticmethod
+    def Execute(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/avplayer.agent.v1.StorageService/Execute',
+            agent__pb2.Struct.SerializeToString,
+            agent__pb2.Struct.FromString,
             options,
             channel_credentials,
             insecure,

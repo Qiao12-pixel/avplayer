@@ -1,122 +1,16 @@
-# AVPlayer Agent Service
+# Python Agent
 
-The agent deployment unit owns model orchestration, media upload/storage and
-the browser-facing Web gateway. The Qt desktop app and Web client only speak
-gRPC/HTTP to it; nothing in `apps/desktop` imports Python or loads a local
-`runtime.py` by path.
+只负责LangGraph编排、文本模型调用及MCP工具调用，不包含媒体工具实现或本地媒体执行回退。
 
-```text
-services/agent/
-├── pyproject.toml            # installable package + console scripts
-├── avplayer_agent/
-│   ├── __main__.py           # avplayer-agent (gRPC server)
-│   ├── runtime.py            # LangGraph loop, local/Ark providers, transcription
-│   ├── ark_client.py         # Doubao Ark LangChain adapter
-│   ├── protocol.py           # message envelope shared with the C++ client
-│   ├── server.py             # MediaService + AgentService servicers
-│   ├── session_manager.py    # one AgentRuntime per session
-│   ├── storage.py            # <storage>/<session_id>/<media_id> layout
-│   ├── local_tools.py        # ffmpeg-backed server-side media tools
-│   ├── cache.py              # optional Redis transcript cache (degrades to disk)
-│   ├── db.py                 # optional MySQL persistence (degrades to disk)
-│   ├── web_gateway.py        # aiohttp WebSocket/HTTP -> gRPC StreamingService
-│   ├── settings.py           # all env-based configuration
-│   └── agent_pb2*.py         # generated from proto/agent.proto
-├── tests/                    # runtime unit tests
-└── docs/                     # tool/schema extension notes
-```
+- runtime.py：智能体和任务协调。
+- mcp_client.py：MCP握手、工具发现、调用、异步任务查询取消。
+- session_manager.py：会话/媒体绑定、消息订阅及工具调用身份注入。
+- data_client/db/cache：基础设施数据RPC适配，不实现数据库驱动或媒体工具。
 
-## Install and run
-
-```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -e 'services/agent[dev]'
-.venv/bin/avplayer-agent                         # gRPC agent service
-.venv/bin/avplayer-web-gateway                   # browser gateway
-```
-
-Or run the same modules without installing:
+工具实现位于独立MCP/src/media，Agent默认连接http://127.0.0.1:8081/jsonrpc，可用AVPLAYER_MCP_URL覆盖。
+MCP对媒体文件的访问要求与上传方共享storage。模型工具schema从MCP发现，session/media/job身份由Agent生成和绑定。
 
 ```sh
 PYTHONPATH=services/agent .venv/bin/python -m avplayer_agent
-PYTHONPATH=services/agent .venv/bin/python -m avplayer_agent.web_gateway
-```
-
-`scripts/dev.sh` starts both together with the media service and Vite client.
-`deploy/docker-compose.yml` runs the containerized variant.
-
-## Configuration
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `AVPLAYER_PROJECT_ROOT` | cwd | root for `config/` and `resource/` |
-| `AVPLAYER_STORAGE_ROOT` | `<root>/storage` | uploaded media and artifacts |
-| `AVPLAYER_AGENT_BIND` | `[::]` | gRPC bind address |
-| `AVPLAYER_AGENT_PORT` | `50061` | gRPC port |
-| `AVPLAYER_AGENT_SERVER` | `localhost:50061` | agent upload target for the Web gateway |
-| `AVPLAYER_MEDIA_SERVER` | `localhost:50062` | media service target for the gateway |
-| `AVPLAYER_AI_PROVIDER` | `local` | `local` (Ollama/Whisper) or `cloud` (Doubao) |
-| `AVPLAYER_OLLAMA_HOST` | value from `local-model.yaml` | override Ollama endpoint |
-| `AVPLAYER_WEB_GATEWAY_HOST` / `_PORT` | `127.0.0.1` / `50065` | gateway bind |
-| `AVPLAYER_ICE_SERVERS` | Google STUN | comma-separated URLs returned by `/config` |
-| `AVPLAYER_REDIS_URL` | `redis://127.0.0.1:6379/0` | transcript cache; empty disables it |
-| `AVPLAYER_REDIS_TTL` | `3600` | cache lifetime in seconds |
-| `AVPLAYER_MYSQL_DSN` | empty | durable store, e.g. `mysql://user:pass@host:3306/avplayer` |
-
-Local mode reads `resource/local-model.yaml`; cloud mode reads
-`config/secret_key.yaml`. Download local models with
-`scripts/download_local_models.sh`.
-
-## Persistence (optional)
-
-Redis and MySQL are optional layers on top of the storage directory; with
-neither running the agent behaves exactly as before.
-
-* **Redis** caches `transcript.json` as `avplayer:transcript:<session>:<media>`
-  (TTL `AVPLAYER_REDIS_TTL`). Summary / semantic search / smart edit read the
-  transcript far more often than it is written.
-* **MySQL** keeps `sessions`, `media`, `transcripts`, `segments` and
-  `task_runs`. Tables are created on first connect; rows are best-effort.
-* Read order is **Redis → disk → MySQL**, and a cache miss repopulates Redis.
-* Any connection or auth failure disables that layer for the process instead
-  of raising, so a task never fails because a cache is down.
-
-Enable locally:
-
-```sh
-export AVPLAYER_REDIS_URL=redis://127.0.0.1:6379/0
-export AVPLAYER_MYSQL_DSN=mysql://avplayer:avplayer@127.0.0.1:3306/avplayer
-```
-
-## Storage contract
-
-`MediaService.UploadMedia` (called by the Qt client or the gateway's
-`POST /upload`) writes the client stream to
-`<storage>/<session_id>/<media_id>/original.*`. `media_server` reads the same
-path for streaming, and server-side tools write `transcript.srt`,
-`transcript.json`, `edit_plan.json` and `clips/` next to it.
-
-`export_video` exports one clip per call: pass `start_ms` + `end_ms` to cut an
-exact span (what content-driven requests need), or only `duration_ms` to take
-a random slice. A single goal may call it several times to produce multiple
-clips.
-
-## Proto
-
-Regenerate Python stubs after editing `proto/agent.proto`:
-
-```sh
-bash scripts/gen_proto.sh
-```
-
-C++ stubs are generated by CMake from `proto/CMakeLists.txt`.
-
-## Tests
-
-```sh
 PYTHONPATH=services/agent .venv/bin/python -m unittest discover -s services/agent/tests -v
-.venv/bin/python tests/grpc_smoke_client.py
 ```
-
-The smoke client starts its own server on `127.0.0.1:50061` and exercises
-upload + a task round trip.

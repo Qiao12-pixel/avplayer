@@ -12,7 +12,7 @@ RUN apt-get update \
         libgrpc++-dev protobuf-compiler protobuf-compiler-grpc libprotobuf-dev \
         qt6-base-dev qt6-multimedia-dev \
         libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev \
-        libopus-dev libssl-dev \
+        libopus-dev libzookeeper-mt-dev libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src

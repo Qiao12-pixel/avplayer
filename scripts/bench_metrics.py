@@ -37,8 +37,7 @@ sys.path.insert(0, str(ROOT / "services" / "agent"))
 
 from avplayer_agent import agent_pb2 as pb  # noqa: E402
 from avplayer_agent import agent_pb2_grpc as pbg  # noqa: E402
-from avplayer_agent.local_tools import export_video  # noqa: E402
-from avplayer_agent.storage import SessionStorage  # noqa: E402
+from avplayer_agent.mcp_client import run_task  # noqa: E402
 
 SESSION = "bench"
 
@@ -147,9 +146,9 @@ def media_duration(path: Path) -> float:
     return float(out)
 
 
-def clip_export(storage: SessionStorage, media_id: str, duration_ms: int) -> dict:
+def clip_export(media_id: str, duration_ms: int) -> dict:
     started = time.perf_counter()
-    result = export_video(storage, SESSION, media_id,
+    result = run_task("export_video", SESSION, media_id,
                           {"start_ms": 0, "end_ms": duration_ms})
     elapsed = time.perf_counter() - started
     return {
@@ -175,6 +174,7 @@ def listening_pid(port: int) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--media-server", default="localhost:50062")
+    parser.add_argument("--data-server", default="localhost:50066")
     parser.add_argument("--agent", default="localhost:50061")
     parser.add_argument("--gateway", default="http://127.0.0.1:50065")
     parser.add_argument("--clip", default=str(ROOT / "resource" / "bench-1080p60.mp4"))
@@ -193,7 +193,7 @@ def main() -> int:
 
     results: dict = {"clip": {"path": str(clip), "duration_s": media_duration(clip)}}
 
-    media_id, upload_stats = upload(clip, args.agent, SESSION)
+    media_id, upload_stats = upload(clip, args.data_server, SESSION)
     results["upload"] = {**upload_stats, "media_id": media_id}
     print(f"[upload] {upload_stats['size_mb']:.1f} MB in {upload_stats['upload_s']:.2f}s "
           f"= {upload_stats['upload_mb_s']:.1f} MB/s", flush=True)
@@ -225,14 +225,13 @@ def main() -> int:
           f"audio={stream_stats.get('audio_kbps', 0):.0f} kbps", flush=True)
     print(f"[control] p50={samples.get('p50_ms', 0):.2f} ms p95={samples.get('p95_ms', 0):.2f} ms", flush=True)
 
-    storage = SessionStorage(ROOT / "storage")
-    results["export"] = clip_export(storage, media_id, int(results["clip"]["duration_s"] * 1000 / 2))
+    results["export"] = clip_export(media_id, int(results["clip"]["duration_s"] * 1000 / 2))
     print(f"[export] {results['export']['wall_s']:.2f}s "
           f"({results['export']['speed_x']:.1f}x realtime)", flush=True)
 
     if args.transcribe:
         speech = Path(args.transcribe_clip) if args.transcribe_clip else clip
-        speech_id, _ = upload(speech, args.agent, "bench-audio")
+        speech_id, _ = upload(speech, args.data_server, "bench-audio")
         audio_s = media_duration(speech)
         results["transcribe"] = transcribe(args.agent, "bench-audio")
         results["transcribe"].update({"audio_s": audio_s, "media_id": speech_id,

@@ -49,30 +49,6 @@ def media_server_target() -> str:
 
 def ai_provider() -> str:
     return "cloud" if os.environ.get("AVPLAYER_AI_PROVIDER") == "cloud" else "local"
-
-
-def web_gateway_host() -> str:
-    return os.environ.get("AVPLAYER_WEB_GATEWAY_HOST", "127.0.0.1")
-
-
-def web_gateway_port() -> int:
-    return int(os.environ.get("AVPLAYER_WEB_GATEWAY_PORT", "50065"))
-
-
 def ice_servers() -> list[dict[str, str]]:
     raw = os.environ.get("AVPLAYER_ICE_SERVERS", "stun:stun.l.google.com:19302")
     return [{"urls": item.strip()} for item in raw.split(",") if item.strip()]
-
-
-def redis_url() -> str:
-    """Optional transcript cache; empty disables Redis entirely."""
-    return os.environ.get("AVPLAYER_REDIS_URL", "redis://127.0.0.1:6379/0")
-
-
-def redis_ttl_seconds() -> int:
-    return int(os.environ.get("AVPLAYER_REDIS_TTL", "3600"))
-
-
-def mysql_dsn() -> str:
-    """Optional durable store; empty disables MySQL entirely."""
-    return os.environ.get("AVPLAYER_MYSQL_DSN", "")

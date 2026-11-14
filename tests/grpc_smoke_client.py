@@ -8,6 +8,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import time
 from pathlib import Path
@@ -35,7 +36,7 @@ def upload(channel, session_id: str, path: Path) -> str:
 
 
 def main() -> None:
-    server = serve(port=50061, bind="127.0.0.1", storage_dir=Path(tempfile.mkdtemp()))
+    server = serve(port=50061, bind="127.0.0.1", storage_dir=Path(os.environ.get("AVPLAYER_STORAGE_ROOT", "storage")))
     try:
         channel = grpc.insecure_channel("localhost:50061")
         session_id = "smoke-session"
@@ -43,7 +44,7 @@ def main() -> None:
         with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as fake_video:
             fake_video.write(b"not a real video, just exercising the upload path")
             fake_path = Path(fake_video.name)
-        media_id = upload(channel, session_id, fake_path)
+        media_id = upload(grpc.insecure_channel(os.environ.get("AVPLAYER_DATA_SERVER", "localhost:50066")), session_id, fake_path)
         print("uploaded media_id =", media_id)
 
         stub = agent_pb2_grpc.AgentServiceStub(channel)

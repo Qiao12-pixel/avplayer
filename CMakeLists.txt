@@ -192,3 +192,5 @@ option(AVPLAYER_BUILD_STREAMING_SMOKE_CLIENT
 add_subdirectory(services/media)
 
 add_subdirectory(apps/desktop)
+
+add_subdirectory(services/gateway)

@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0b\x61gent.proto\x12\x11\x61vplayer.agent.v1\"A\n\nMediaChunk\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x11\n\tfile_name\x18\x02 \x01(\t\x12\x0c\n\x04\x64\x61ta\x18\x03 \x01(\x0c\"3\n\x0bMediaHandle\x12\x10\n\x08media_id\x18\x01 \x01(\t\x12\x12\n\nsize_bytes\x18\x02 \x01(\x03\"\xbf\x01\n\rClientMessage\x12\x0c\n\x04type\x18\x01 \x01(\t\x12\x12\n\nrequest_id\x18\x02 \x01(\t\x12\x12\n\nsession_id\x18\x03 \x01(\t\x12\x10\n\x08media_id\x18\x04 \x01(\t\x12\x0c\n\x04tool\x18\x05 \x01(\t\x12*\n\x07payload\x18\x06 \x01(\x0b\x32\x19.avplayer.agent.v1.Struct\x12,\n\targuments\x18\x07 \x01(\x0b\x32\x19.avplayer.agent.v1.Struct\"\xad\x01\n\rServerMessage\x12\x0c\n\x04type\x18\x01 \x01(\t\x12\x12\n\nrequest_id\x18\x02 \x01(\t\x12\x12\n\nsession_id\x18\x03 \x01(\t\x12\x0c\n\x04tool\x18\x04 \x01(\t\x12*\n\x07payload\x18\x05 \x01(\x0b\x32\x19.avplayer.agent.v1.Struct\x12,\n\targuments\x18\x06 \x01(\x0b\x32\x19.avplayer.agent.v1.Struct\"\x16\n\x06Struct\x12\x0c\n\x04json\x18\x01 \x01(\t\"p\n\rSignalMessage\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x10\n\x08media_id\x18\x02 \x01(\t\x12\x0c\n\x04kind\x18\x03 \x01(\t\x12\x0b\n\x03sdp\x18\x04 \x01(\t\x12\x11\n\tcandidate\x18\x05 \x01(\t\x12\x0b\n\x03mid\x18\x06 \x01(\t\"X\n\x0e\x43ontrolRequest\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x10\n\x08media_id\x18\x02 \x01(\t\x12\x0e\n\x06\x61\x63tion\x18\x03 \x01(\t\x12\x10\n\x08position\x18\x04 \x01(\x02\"\x8f\x01\n\nControlAck\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\r\n\x05\x65rror\x18\x02 \x01(\t\x12\x13\n\x0b\x64uration_ms\x18\x03 \x01(\x01\x12\x13\n\x0bposition_ms\x18\x04 \x01(\x01\x12\x0f\n\x07playing\x18\x05 \x01(\x08\x12\x11\n\trecording\x18\x06 \x01(\x08\x12\x13\n\x0boutput_path\x18\x07 \x01(\t2^\n\x0cMediaService\x12N\n\x0bUploadMedia\x12\x1d.avplayer.agent.v1.MediaChunk\x1a\x1e.avplayer.agent.v1.MediaHandle(\x01\x32\x62\n\x0c\x41gentService\x12R\n\x08\x43onverse\x12 .avplayer.agent.v1.ClientMessage\x1a .avplayer.agent.v1.ServerMessage(\x01\x30\x01\x32\xb1\x01\n\x10StreamingService\x12P\n\x06Signal\x12 .avplayer.agent.v1.SignalMessage\x1a .avplayer.agent.v1.SignalMessage(\x01\x30\x01\x12K\n\x07\x43ontrol\x12!.avplayer.agent.v1.ControlRequest\x1a\x1d.avplayer.agent.v1.ControlAckb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0b\x61gent.proto\x12\x11\x61vplayer.agent.v1\"A\n\nMediaChunk\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x11\n\tfile_name\x18\x02 \x01(\t\x12\x0c\n\x04\x64\x61ta\x18\x03 \x01(\x0c\"3\n\x0bMediaHandle\x12\x10\n\x08media_id\x18\x01 \x01(\t\x12\x12\n\nsize_bytes\x18\x02 \x01(\x03\"9\n\x11MediaRegistration\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x10\n\x08media_id\x18\x02 \x01(\t\"\xbf\x01\n\rClientMessage\x12\x0c\n\x04type\x18\x01 \x01(\t\x12\x12\n\nrequest_id\x18\x02 \x01(\t\x12\x12\n\nsession_id\x18\x03 \x01(\t\x12\x10\n\x08media_id\x18\x04 \x01(\t\x12\x0c\n\x04tool\x18\x05 \x01(\t\x12*\n\x07payload\x18\x06 \x01(\x0b\x32\x19.avplayer.agent.v1.Struct\x12,\n\targuments\x18\x07 \x01(\x0b\x32\x19.avplayer.agent.v1.Struct\"\xad\x01\n\rServerMessage\x12\x0c\n\x04type\x18\x01 \x01(\t\x12\x12\n\nrequest_id\x18\x02 \x01(\t\x12\x12\n\nsession_id\x18\x03 \x01(\t\x12\x0c\n\x04tool\x18\x04 \x01(\t\x12*\n\x07payload\x18\x05 \x01(\x0b\x32\x19.avplayer.agent.v1.Struct\x12,\n\targuments\x18\x06 \x01(\x0b\x32\x19.avplayer.agent.v1.Struct\"\x16\n\x06Struct\x12\x0c\n\x04json\x18\x01 \x01(\t\"p\n\rSignalMessage\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x10\n\x08media_id\x18\x02 \x01(\t\x12\x0c\n\x04kind\x18\x03 \x01(\t\x12\x0b\n\x03sdp\x18\x04 \x01(\t\x12\x11\n\tcandidate\x18\x05 \x01(\t\x12\x0b\n\x03mid\x18\x06 \x01(\t\"X\n\x0e\x43ontrolRequest\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x10\n\x08media_id\x18\x02 \x01(\t\x12\x0e\n\x06\x61\x63tion\x18\x03 \x01(\t\x12\x10\n\x08position\x18\x04 \x01(\x02\"\x8f\x01\n\nControlAck\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\r\n\x05\x65rror\x18\x02 \x01(\t\x12\x13\n\x0b\x64uration_ms\x18\x03 \x01(\x01\x12\x13\n\x0bposition_ms\x18\x04 \x01(\x01\x12\x0f\n\x07playing\x18\x05 \x01(\x08\x12\x11\n\trecording\x18\x06 \x01(\x08\x12\x13\n\x0boutput_path\x18\x07 \x01(\t2^\n\x0cMediaService\x12N\n\x0bUploadMedia\x12\x1d.avplayer.agent.v1.MediaChunk\x1a\x1e.avplayer.agent.v1.MediaHandle(\x01\x32\xb8\x01\n\x0c\x41gentService\x12T\n\rRegisterMedia\x12$.avplayer.agent.v1.MediaRegistration\x1a\x1d.avplayer.agent.v1.ControlAck\x12R\n\x08\x43onverse\x12 .avplayer.agent.v1.ClientMessage\x1a .avplayer.agent.v1.ServerMessage(\x01\x30\x01\x32\xb1\x01\n\x10StreamingService\x12P\n\x06Signal\x12 .avplayer.agent.v1.SignalMessage\x1a .avplayer.agent.v1.SignalMessage(\x01\x30\x01\x12K\n\x07\x43ontrol\x12!.avplayer.agent.v1.ControlRequest\x1a\x1d.avplayer.agent.v1.ControlAck2Q\n\x0eStorageService\x12?\n\x07\x45xecute\x12\x19.avplayer.agent.v1.Struct\x1a\x19.avplayer.agent.v1.Structb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -35,22 +35,26 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_MEDIACHUNK']._serialized_end=99
   _globals['_MEDIAHANDLE']._serialized_start=101
   _globals['_MEDIAHANDLE']._serialized_end=152
-  _globals['_CLIENTMESSAGE']._serialized_start=155
-  _globals['_CLIENTMESSAGE']._serialized_end=346
-  _globals['_SERVERMESSAGE']._serialized_start=349
-  _globals['_SERVERMESSAGE']._serialized_end=522
-  _globals['_STRUCT']._serialized_start=524
-  _globals['_STRUCT']._serialized_end=546
-  _globals['_SIGNALMESSAGE']._serialized_start=548
-  _globals['_SIGNALMESSAGE']._serialized_end=660
-  _globals['_CONTROLREQUEST']._serialized_start=662
-  _globals['_CONTROLREQUEST']._serialized_end=750
-  _globals['_CONTROLACK']._serialized_start=753
-  _globals['_CONTROLACK']._serialized_end=896
-  _globals['_MEDIASERVICE']._serialized_start=898
-  _globals['_MEDIASERVICE']._serialized_end=992
-  _globals['_AGENTSERVICE']._serialized_start=994
-  _globals['_AGENTSERVICE']._serialized_end=1092
-  _globals['_STREAMINGSERVICE']._serialized_start=1095
-  _globals['_STREAMINGSERVICE']._serialized_end=1272
+  _globals['_MEDIAREGISTRATION']._serialized_start=154
+  _globals['_MEDIAREGISTRATION']._serialized_end=211
+  _globals['_CLIENTMESSAGE']._serialized_start=214
+  _globals['_CLIENTMESSAGE']._serialized_end=405
+  _globals['_SERVERMESSAGE']._serialized_start=408
+  _globals['_SERVERMESSAGE']._serialized_end=581
+  _globals['_STRUCT']._serialized_start=583
+  _globals['_STRUCT']._serialized_end=605
+  _globals['_SIGNALMESSAGE']._serialized_start=607
+  _globals['_SIGNALMESSAGE']._serialized_end=719
+  _globals['_CONTROLREQUEST']._serialized_start=721
+  _globals['_CONTROLREQUEST']._serialized_end=809
+  _globals['_CONTROLACK']._serialized_start=812
+  _globals['_CONTROLACK']._serialized_end=955
+  _globals['_MEDIASERVICE']._serialized_start=957
+  _globals['_MEDIASERVICE']._serialized_end=1051
+  _globals['_AGENTSERVICE']._serialized_start=1054
+  _globals['_AGENTSERVICE']._serialized_end=1238
+  _globals['_STREAMINGSERVICE']._serialized_start=1241
+  _globals['_STREAMINGSERVICE']._serialized_end=1418
+  _globals['_STORAGESERVICE']._serialized_start=1420
+  _globals['_STORAGESERVICE']._serialized_end=1501
 # @@protoc_insertion_point(module_scope)

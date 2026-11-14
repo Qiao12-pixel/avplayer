@@ -1,3 +1,5 @@
+> 网络与数据层已迁移：HTTP/WebSocket、上传及 Redis/MySQL 由 [C++ gateway](services/gateway/README.md) 唯一提供。Python Agent 保留智能体编排和内部 gRPC；上传/存储端口为 50066，Agent 端口为 50061。下文历史架构细节以 gateway 说明为准。
+
 # 📋 项目简介
 
 AVPlayer 是一套 **C++17 + Qt + FFmpeg + OpenGL** 的音视频播放与流媒体系统，由两个客户端和两个服务端单元组成：
@@ -157,7 +159,8 @@ AVPlayer/
 | --- | --- | --- |
 | `apps/desktop` | `AVPlayer` | `libs/media-core` + `proto`；通过 gRPC 连接 `services/agent` 与 `services/media` |
 | `apps/web` | Vite/nginx | HTTP/WebSocket 到 `services/agent` 的 Web 网关 |
-| `services/agent` | `avplayer-agent`、`avplayer-web-gateway` | 独立 Python 包；读写共享存储；网关进程 gRPC 转发到 `services/media` |
+| `services/agent` | `avplayer-agent` | Python 智能体编排，经内部 gRPC 访问 C++ 数据服务 |
+| `services/gateway` | `web_gateway` | C++ Asio/Beast；HTTP/WS、上传、Redis/MySQL |
 | `services/media` | `media_server` | `libs/media-core` + `proto`；不构建、不链接 Qt 桌面应用 |
 | `libs/media-core` | 静态库 | 仅媒体解码/同步/帧类型/录制编码，不含桌面 UI |
 | `proto` | `avplayer_proto` 静态库 | 两个 C++ 部署单元共享的 gRPC 契约 |
@@ -412,3 +415,21 @@ doubao_speech_api_key: "你的豆包语音新版控制台 API Key"
 | 豆包模式提示配置不完整 | 核对 `config/secret_key.yaml` 的文本模型与语音密钥字段，修改配置后重启应用 |
 | 模式切换后自动回退 | 等待当前 AI/Agent 任务结束，再重新选择模型方式 |
 | 本地 Agent 报 `properties must be an object` | 更新并重新构建客户端；工具参数必须是包含对象形式 `properties` 的 JSON schema，Python Runtime 会补齐空参数工具的 schema |
+
+### ZooKeeper 与媒体会话均衡
+
+C++ 媒体实例用 ZooKeeper 临时节点注册，C++ 网关按本地活跃会话数分配新播放，固定后续信令/控制路由。
+支持实例摘除、重注册以及 ZooKeeper 断连期间保留已有会话；未设置 `AVPLAYER_ZK_HOSTS` 时使用静态单实例。
+实现与复现见 [deploy/ZOOKEEPER.md](deploy/ZOOKEEPER.md)。当前范围为单网关的媒体调度，不包含跨网关共享会话或无缝迁移。
+
+
+### Agent工具
+
+媒体查询、字幕与计划读写、抽音轨、导出、转码等由仓库内thirdParty/MCP独立实现。AVPlayer已删除重复的工具与任务Worker代码，Agent只调用MCP；实时播放编解码仍由media_server承担。
+
+### 第三方 MCP 模块
+
+MCP已作为Git子模块纳入 `thirdParty/MCP`。首次安装依赖可运行 `scripts/build_mcp.sh --install-deps`（需Conan）；已有依赖运行 `scripts/build_mcp.sh`。
+构建产物位于 `build/mcp`，`scripts/dev.sh` 默认启动仓库内版本。来源与集成边界见 `thirdParty/MCP/UPSTREAM.md`。
+
+MCP为Git子模块，首次检出请执行 `git submodule update --init --recursive`，再执行scripts/build_mcp.sh。子模块版本更新需先推送MCP提交，再提交AVPlayer中的gitlink。

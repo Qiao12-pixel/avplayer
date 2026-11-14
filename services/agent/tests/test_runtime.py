@@ -219,8 +219,8 @@ class RuntimeTests(unittest.TestCase):
         def executor(tool, arguments, session_id):
             if tool == "get_media_context":
                 return {"success": True, "loaded": True, "path": "media-id"}
-            if tool == "extract_audio":
-                return {"success": True, "path": str(audio_path)}
+            if tool == "transcribe_subtitle":
+                return {"success": True, "segments": segments}
             if tool == "save_transcript":
                 return {"success": True, "path": "/tmp/transcript.srt"}
             raise AssertionError(f"unexpected tool {tool}")
@@ -230,8 +230,7 @@ class RuntimeTests(unittest.TestCase):
         runtime.local_speech_configured = lambda: True
         segments = [{"start_ms": 0, "end_ms": 500, "text": "你好"},
                     {"start_ms": 500, "end_ms": 1000, "text": "世界"}]
-        with patch.object(runtime, "_transcribe_local", return_value=segments):
-            result = runtime._transcribe("desktop")
+        result = runtime._transcribe("desktop")
         self.assertTrue(result["success"])
         self.assertEqual(result["segments"], segments)
 

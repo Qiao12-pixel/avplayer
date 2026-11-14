@@ -152,7 +152,7 @@ private:
     std::unique_ptr<av::WebRtcPlaybackSource> m_streamingSource;
     bool m_streamingMode{false};
     bool m_pendingStreamingRecord{false};
-    QString m_mediaServerAddress{"localhost:50062"};
+    QString m_mediaServerAddress{"localhost:50066"};
     std::unique_ptr<av::IRecordSession> m_recordSession;
     std::atomic<uint64_t> m_playbackGeneration{0};
     QString m_aiProvider{"local"};

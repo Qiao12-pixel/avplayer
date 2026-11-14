@@ -34,35 +34,11 @@ def _encode(value: dict[str, Any]) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-class MediaServicer(agent_pb2_grpc.MediaServiceServicer):
-    def __init__(self, sessions: SessionManager) -> None:
-        self._sessions = sessions
-
-    def UploadMedia(self, request_iterator, context):
-        session_id = ""
-        file_name = ""
-        media_id = ""
-        destination = None
-        size = 0
-        for chunk in request_iterator:
-            if destination is None:
-                session_id = chunk.session_id
-                file_name = chunk.file_name
-                if not session_id:
-                    context.abort(grpc.StatusCode.INVALID_ARGUMENT, "first chunk must set session_id")
-                media_id = self._sessions.storage.new_media_id()
-                destination = self._sessions.storage.original_path(session_id, media_id, file_name)
-            with open(destination, "ab") as handle:
-                handle.write(chunk.data)
-            size += len(chunk.data)
-        if destination is None:
-            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "empty upload")
-        self._sessions.register_upload(session_id, media_id)
-        database().record_media(session_id, media_id, file_name, size)
-        return agent_pb2.MediaHandle(media_id=media_id, size_bytes=size)
-
-
 class AgentServicer(agent_pb2_grpc.AgentServiceServicer):
+    def RegisterMedia(self, request, context):
+        self._sessions.register_upload(request.session_id, request.media_id)
+        return agent_pb2.ControlAck(success=True)
+
     def __init__(self, sessions: SessionManager) -> None:
         self._sessions = sessions
 
@@ -135,7 +111,6 @@ def serve(port: int | None = None, bind: str | None = None,
     bind = agent_bind() if bind is None else bind
     sessions = SessionManager(storage_dir or default_storage_root())
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=16))
-    agent_pb2_grpc.add_MediaServiceServicer_to_server(MediaServicer(sessions), server)
     agent_pb2_grpc.add_AgentServiceServicer_to_server(AgentServicer(sessions), server)
     server.add_insecure_port(f"{bind}:{port}")
     server.start()

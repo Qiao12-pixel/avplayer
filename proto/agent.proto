@@ -24,7 +24,10 @@ message MediaHandle {
 // Agent orchestration: one bidirectional stream per session for the
 // avplayer.agent.v1 message envelope. Message field names mirror the payload
 // shapes produced by services/agent/avplayer_agent/protocol.py.
+message MediaRegistration { string session_id = 1; string media_id = 2; }
+
 service AgentService {
+  rpc RegisterMedia(MediaRegistration) returns (ControlAck);
   rpc Converse(stream ClientMessage) returns (stream ServerMessage);
 }
 
@@ -97,4 +100,9 @@ message ControlAck {
   bool recording = 6;
   // Set for record_start/record_stop (server-side recording output).
   string output_path = 7;
+}
+
+// Internal persistence boundary. Python orchestration never connects to stores.
+service StorageService {
+  rpc Execute(Struct) returns (Struct);
 }

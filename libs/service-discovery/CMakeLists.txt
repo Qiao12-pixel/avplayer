@@ -1,0 +1,8 @@
+find_path(ZOOKEEPER_INCLUDE_DIR zookeeper/zookeeper.h REQUIRED)
+find_library(ZOOKEEPER_LIBRARY zookeeper_mt REQUIRED)
+find_package(Threads REQUIRED)
+add_library(avplayer_discovery STATIC Registry.cpp)
+target_compile_features(avplayer_discovery PUBLIC cxx_std_17)
+target_compile_definitions(avplayer_discovery PRIVATE THREADED)
+target_include_directories(avplayer_discovery PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} PRIVATE ${ZOOKEEPER_INCLUDE_DIR})
+target_link_libraries(avplayer_discovery PUBLIC ${ZOOKEEPER_LIBRARY} Threads::Threads)

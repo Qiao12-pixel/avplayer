@@ -97,3 +97,8 @@ if(AVPLAYER_BUILD_STREAMING_SMOKE_CLIENT)
         datachannel
     )
 endif()
+
+if(NOT TARGET avplayer_discovery)
+  add_subdirectory(../../libs/service-discovery ${CMAKE_BINARY_DIR}/service-discovery)
+endif()
+target_link_libraries(media_server PRIVATE avplayer_discovery)

@@ -1,0 +1,31 @@
+cmake_minimum_required(VERSION 3.23)
+project(AVPlayerGateway LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+if(PROJECT_IS_TOP_LEVEL)
+  find_package(Protobuf CONFIG REQUIRED)
+  find_package(gRPC CONFIG REQUIRED)
+  add_subdirectory(../../proto ${CMAKE_BINARY_DIR}/proto)
+endif()
+find_package(Boost REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(Threads REQUIRED)
+add_executable(web_gateway src/main.cpp)
+target_include_directories(web_gateway PRIVATE ${Boost_INCLUDE_DIRS})
+target_link_libraries(web_gateway PRIVATE avplayer_proto nlohmann_json::nlohmann_json Threads::Threads)
+find_path(MYSQL_INCLUDE_DIR mysql/mysql.h REQUIRED)
+find_library(MYSQL_LIBRARY mysqlclient PATHS /opt/homebrew/opt/mysql/lib REQUIRED)
+find_path(HIREDIS_INCLUDE_DIR hiredis/hiredis.h REQUIRED)
+find_library(HIREDIS_LIBRARY hiredis REQUIRED)
+target_sources(web_gateway PRIVATE src/Storage.cpp)
+target_include_directories(web_gateway PRIVATE ${MYSQL_INCLUDE_DIR} ${HIREDIS_INCLUDE_DIR})
+target_link_libraries(web_gateway PRIVATE ${MYSQL_LIBRARY} ${HIREDIS_LIBRARY})
+
+if(NOT TARGET avplayer_discovery)
+  add_subdirectory(../../libs/service-discovery ${CMAKE_BINARY_DIR}/service-discovery)
+endif()
+target_sources(web_gateway PRIVATE src/MediaRouter.cpp)
+target_link_libraries(web_gateway PRIVATE avplayer_discovery)
+
+
+
+

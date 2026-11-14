@@ -5,6 +5,7 @@ video, using the server-side Agent gRPC service directly — no Qt involved.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -36,7 +37,7 @@ def main() -> None:
     session_id = "manual-check"
 
     t0 = time.monotonic()
-    media_id = upload(channel, session_id, video_path)
+    media_id = upload(grpc.insecure_channel(os.environ.get("AVPLAYER_DATA_SERVER", "localhost:50066")), session_id, video_path)
     print(f"uploaded media_id={media_id} in {time.monotonic() - t0:.1f}s")
 
     stub = agent_pb2_grpc.AgentServiceStub(channel)

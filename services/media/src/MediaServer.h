@@ -38,7 +38,6 @@ private:
     std::map<std::string, std::shared_ptr<MediaSession>> m_sessions;
 };
 
-std::unique_ptr<grpc::Server> StartMediaServer(const std::string& address, const std::string& storageRoot);
 
 }
 

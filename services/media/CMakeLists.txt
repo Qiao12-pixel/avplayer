@@ -6,9 +6,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
 
-# This directory is an independent deployment unit: it only needs
-# libs/media-core + proto, never the Qt desktop application.
-if(PROJECT_IS_TOP_LEVEL)
+# Internal media module: dependency setup is also reusable by services/server.
+if(NOT TARGET avplayer_media_core)
     get_filename_component(AVPLAYER_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 
     list(PREPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/grpc" "/opt/homebrew/opt/protobuf")
@@ -62,8 +61,7 @@ else()
     endif()
 endif()
 
-add_executable(media_server
-    src/main_media_server.cpp
+add_library(avplayer_media_service STATIC
     src/MediaServer.cpp
     src/MediaServer.h
     src/MediaSession.cpp
@@ -74,11 +72,11 @@ add_executable(media_server
     src/WebRtcAudioSink.h
 )
 
-target_include_directories(media_server PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_compile_definitions(media_server PRIVATE
+target_include_directories(avplayer_media_service PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_definitions(avplayer_media_service PRIVATE
     AVPLAYER_PROJECT_ROOT="${AVPLAYER_SOURCE_ROOT}"
 )
-target_link_libraries(media_server PRIVATE
+target_link_libraries(avplayer_media_service PUBLIC
     avplayer_media_core
     avplayer_proto
     datachannel
@@ -97,8 +95,3 @@ if(AVPLAYER_BUILD_STREAMING_SMOKE_CLIENT)
         datachannel
     )
 endif()
-
-if(NOT TARGET avplayer_discovery)
-  add_subdirectory(../../libs/service-discovery ${CMAKE_BINARY_DIR}/service-discovery)
-endif()
-target_link_libraries(media_server PRIVATE avplayer_discovery)

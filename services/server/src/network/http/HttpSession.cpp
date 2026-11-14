@@ -1,222 +1,8 @@
-#include "MediaRouter.h"
-#include "Storage.h"
-#include "Upload.h"
-#include "agent.grpc.pb.h"
-#include <boost/asio.hpp>
-#include <boost/beast.hpp>
-#include <boost/beast/websocket.hpp>
-#include <cstdlib>
-#include <deque>
-#include <filesystem>
-#include <grpcpp/grpcpp.h>
-#include <iostream>
-#include <nlohmann/json.hpp>
-#include <sstream>
-#include <thread>
-namespace net = boost::asio;
-namespace beast = boost::beast;
-namespace http = beast::http;
-namespace ws = beast::websocket;
-namespace api = avplayer::agent::v1;
-using tcp = net::ip::tcp;
-using json = nlohmann::json;
-std::string env(const char *k, const char *d) {
-  auto v = std::getenv(k);
-  return v ? v : d;
-}
-auto channel(const char *key, const char *fallback) {
-  return grpc::CreateChannel(env(key, fallback),
-                             grpc::InsecureChannelCredentials());
-}
-std::string decode(std::string s) {
-  std::string out;
-  for (size_t i = 0; i < s.size(); ++i) {
-    if (s[i] == '%' && i + 2 < s.size()) {
-      char *end = nullptr;
-      auto h = s.substr(i + 1, 2);
-      long v = strtol(h.c_str(), &end, 16);
-      if (end == h.c_str() + 2) {
-        out += char(v);
-        i += 2;
-        continue;
-      }
-    }
-    out += s[i];
-  }
-  return out;
-}
-class Socket : public std::enable_shared_from_this<Socket> {
-  ws::stream<beast::tcp_stream> socket;
-  beast::flat_buffer buffer;
-  net::thread_pool &worker;
-  grpc::ClientContext context;
-  std::unique_ptr<api::StreamingService::Stub> media;
-  std::unique_ptr<api::AgentService::Stub> agent;
-  std::unique_ptr<
-      grpc::ClientReaderWriter<api::SignalMessage, api::SignalMessage>>
-      signal;
-  std::unique_ptr<
-      grpc::ClientReaderWriter<api::ClientMessage, api::ServerMessage>>
-      converse;
-  std::deque<std::string> writes;
-  size_t queued = 0;
-  bool stopped = false;
-  bool agentMode;
-  std::mutex rpcMutex;
-  bool rpcFinished = false;
-  void stop() {
-    if (stopped)
-      return;
-    stopped = true;
-    context.TryCancel();
-    beast::error_code ec;
-    beast::get_lowest_layer(socket).socket().close(ec);
-  }
-  void send(json data) {
-    auto self = shared_from_this();
-    net::post(socket.get_executor(), [self, text = data.dump()] {
-      if (self->stopped)
-        return;
-      if (self->queued + text.size() > 4 * 1024 * 1024) {
-        self->stop();
-        return;
-      }
-      self->queued += text.size();
-      self->writes.push_back(text);
-      if (self->writes.size() == 1)
-        self->write();
-    });
-  }
-  void write() {
-    auto self = shared_from_this();
-    socket.async_write(net::buffer(writes.front()),
-                       [self](beast::error_code ec, size_t) {
-                         if (ec) {
-                           self->stop();
-                           return;
-                         }
-                         self->queued -= self->writes.front().size();
-                         self->writes.pop_front();
-                         if (!self->writes.empty())
-                           self->write();
-                       });
-  }
-  void read() {
-    auto self = shared_from_this();
-    socket.async_read(buffer, [self](beast::error_code ec, size_t) {
-      if (ec) {
-        self->stop();
-        return;
-      }
-      try {
-        auto data = json::parse(beast::buffers_to_string(self->buffer.data()));
-        self->buffer.consume(self->buffer.size());
-        net::post(self->worker, [self, data] {
-          bool ok = false;
-          try {
-            std::lock_guard<std::mutex> lock(self->rpcMutex);
-            if (self->rpcFinished)
-              return;
-            if (self->agentMode) {
-              api::ClientMessage m;
-              m.set_type(data.value("type", ""));
-              m.set_session_id(data.value("session_id", "web"));
-              m.set_media_id(data.value("media_id", ""));
-              m.set_request_id(data.value("request_id", ""));
-              m.set_tool(data.value("tool", ""));
-              m.mutable_payload()->set_json(
-                  data.value("payload", json::object()).dump());
-              m.mutable_arguments()->set_json(
-                  data.value("arguments", json::object()).dump());
-              ok = self->converse->Write(m);
-            } else {
-              api::SignalMessage m;
-              m.set_kind(data.value("kind", ""));
-              m.set_session_id(data.value("session_id", ""));
-              m.set_media_id(data.value("media_id", ""));
-              m.set_sdp(data.value("sdp", ""));
-              m.set_candidate(data.value("candidate", ""));
-              m.set_mid(data.value("mid", ""));
-              ok = self->signal->Write(m);
-            }
-          } catch (const std::exception &e) {
-            self->send(
-                {{"kind", "error"}, {"type", "error"}, {"error", e.what()}});
-          }
-          net::post(self->socket.get_executor(), [self, ok] {
-            if (!ok)
-              self->stop();
-            else if (!self->stopped)
-              self->read();
-          });
-        });
-      } catch (const std::exception &e) {
-        self->send({{"error", e.what()}});
-        self->stop();
-      }
-    });
-  }
-
-public:
-  Socket(beast::tcp_stream stream, bool mode, net::thread_pool &pool)
-      : socket(std::move(stream)), worker(pool), agentMode(mode) {}
-  void run(http::request<http::empty_body> req) {
-    socket.read_message_max(4 * 1024 * 1024);
-    socket.set_option(
-        ws::stream_base::timeout::suggested(beast::role_type::server));
-    auto self = shared_from_this();
-    auto upgrade =
-        std::make_shared<http::request<http::empty_body>>(std::move(req));
-    socket.async_accept(*upgrade, [self, upgrade](beast::error_code ec) {
-      if (ec)
-        return;
-      if (self->agentMode) {
-        self->agent = api::AgentService::NewStub(
-            channel("AVPLAYER_AGENT_SERVER", "localhost:50061"));
-        self->converse = self->agent->Converse(&self->context);
-      } else {
-        self->media = api::StreamingService::NewStub(
-            channel("AVPLAYER_DATA_SERVER", "localhost:50066"));
-        self->signal = self->media->Signal(&self->context);
-      }
-      std::thread([self] {
-        if (self->agentMode) {
-          api::ServerMessage m;
-          while (self->converse->Read(&m)) {
-            self->send({{"type", m.type()},
-                        {"request_id", m.request_id()},
-                        {"session_id", m.session_id()},
-                        {"tool", m.tool()},
-                        {"payload", json::parse(m.payload().json().empty()
-                                                    ? "{}"
-                                                    : m.payload().json(),
-                                                nullptr, false)},
-                        {"arguments", json::parse(m.arguments().json().empty()
-                                                      ? "{}"
-                                                      : m.arguments().json(),
-                                                  nullptr, false)}});
-          }
-        } else {
-          api::SignalMessage m;
-          while (self->signal->Read(&m))
-            self->send({{"kind", m.kind()},
-                        {"sdp", m.sdp()},
-                        {"candidate", m.candidate()},
-                        {"mid", m.mid()}});
-        }
-        self->context.TryCancel();
-        std::lock_guard<std::mutex> lock(self->rpcMutex);
-        self->rpcFinished = true;
-        auto status =
-            self->agentMode ? self->converse->Finish() : self->signal->Finish();
-        net::post(self->socket.get_executor(),
-                  [self, status] { self->stop(); });
-      }).detach();
-      self->read();
-    });
-  }
-};
-class Http : public std::enable_shared_from_this<Http> {
+#include "HttpSession.h"
+#include "network/websocket/WebSocketSession.h"
+#include "rpc/MediaRouter.h"
+namespace avserver::network {
+class HttpSession : public std::enable_shared_from_this<HttpSession> {
   beast::tcp_stream stream;
   beast::flat_buffer buffer;
   http::request_parser<http::buffer_body> parser;
@@ -250,7 +36,7 @@ class Http : public std::enable_shared_from_this<Http> {
       while (std::getline(ss, part, '&')) {
         auto eq = part.find('=');
         if (eq != std::string::npos)
-          args[decode(part.substr(0, eq))] = decode(part.substr(eq + 1));
+          args[DecodeUrl(part.substr(0, eq))] = DecodeUrl(part.substr(eq + 1));
       }
     }
     namespace fs = std::filesystem;
@@ -379,7 +165,7 @@ class Http : public std::enable_shared_from_this<Http> {
   }
 
 public:
-  Http(tcp::socket s, net::thread_pool &pool, MediaRouter &router)
+  HttpSession(tcp::socket s, net::thread_pool &pool, MediaRouter &router)
       : stream(std::move(s)), workers(pool), router(router) {
     parser.body_limit(8ULL * 1024 * 1024 * 1024);
   }
@@ -400,9 +186,8 @@ public:
             upgrade.version(req.version());
             upgrade.base() = req.base();
             self->stream.expires_never();
-            std::make_shared<Socket>(std::move(self->stream),
-                                     target == "/agent", self->workers)
-                ->run(std::move(upgrade));
+            StartWebSocket(std::move(self->stream), target == "/agent",
+                           self->workers, std::move(upgrade));
             return;
           }
           if (req.method() == http::verb::get &&
@@ -434,7 +219,7 @@ public:
               self->reply(400, {{"error", "X-Session-Id required"}});
               return;
             }
-            std::string name = decode(std::string(req["X-File-Name"]));
+            std::string name = DecodeUrl(std::string(req["X-File-Name"]));
             net::post(self->workers, [self, session, name] {
               self->uploader = api::MediaService::NewStub(
                   channel("AVPLAYER_DATA_SERVER", "localhost:50066"));
@@ -459,42 +244,9 @@ public:
         });
   }
 };
-int main() {
-  try {
-    Storage storage;
-    MediaRouter router;
-    UploadService upload(storage);
-    grpc::ServerBuilder builder;
-    builder.AddListeningPort(
-        env("AVPLAYER_DATA_SERVER_ADDRESS", "127.0.0.1:50066"),
-        grpc::InsecureServerCredentials());
-    builder.RegisterService(&storage);
-    builder.RegisterService(&upload);
-    builder.RegisterService(&router);
-    auto grpcServer = builder.BuildAndStart();
-    if (!grpcServer)
-      throw std::runtime_error("cannot start data service");
-    net::io_context io;
-    net::thread_pool workers(8);
-    auto host = env("AVPLAYER_WEB_GATEWAY_HOST", "127.0.0.1");
-    auto port = static_cast<unsigned short>(
-        std::stoi(env("AVPLAYER_WEB_GATEWAY_PORT", "50065")));
-    tcp::acceptor acceptor(io, {net::ip::make_address(host), port});
-    std::function<void()> accept;
-    accept = [&] {
-      acceptor.async_accept(
-          net::make_strand(io), [&](beast::error_code ec, tcp::socket socket) {
-            if (!ec)
-              std::make_shared<Http>(std::move(socket), workers, router)->run();
-            accept();
-          });
-    };
-    accept();
-    std::cout << "C++ gateway listening on " << host << ":" << port
-              << std::endl;
-    io.run();
-  } catch (const std::exception &e) {
-    std::cerr << e.what() << std::endl;
-    return 1;
-  }
+
+void StartHttp(tcp::socket socket, net::thread_pool &workers,
+               MediaRouter &router) {
+  std::make_shared<HttpSession>(std::move(socket), workers, router)->run();
 }
+} // namespace avserver::network

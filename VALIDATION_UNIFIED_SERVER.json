@@ -1,0 +1,132 @@
+{
+  "base_url": "http://127.0.0.1:5175",
+  "started": "2026-11-14 19:33:19",
+  "checks": [
+    {
+      "name": "Web page and same-origin config",
+      "success": true
+    },
+    {
+      "name": "HTTP streaming upload + Agent media binding",
+      "success": true,
+      "bytes": 23292898
+    },
+    {
+      "name": "WebSocket signaling and HTTP status/pause/seek/play",
+      "success": true,
+      "duration_ms": 132458.99963378906
+    },
+    {
+      "name": "Real H264/Opus WebRTC receive and server recording",
+      "success": true,
+      "metrics": {
+        "track_open": "1",
+        "connect_ms": "66.227",
+        "first_video_ms": "16.2628",
+        "window_s": "8.03268",
+        "video_packets": "2312",
+        "video_mbps": "1.44226",
+        "video_pkt_per_s": "287.824",
+        "audio_kbps": "66.5711",
+        "audio_pkt_per_s": "51.166",
+        "pkt_interval_p50_ms": "0.0105",
+        "pkt_interval_p95_ms": "41.1333",
+        "control_p50_ms": "1.457",
+        "control_p95_ms": "2.31858",
+        "recording_path": "/Users/joe/CLionProjects/AVPlayer/storage/full-test-967cca5d13/a2fc18bbc3f76b9862ac582321a9c04c/recording-1794656009327.mp4"
+      }
+    },
+    {
+      "name": "Recording HTTP download",
+      "success": true,
+      "bytes": 400844
+    },
+    {
+      "name": "Agent transcribe_subtitle",
+      "success": true,
+      "seconds": 5.79,
+      "stages": [
+        "worker_queued",
+        "worker_running",
+        "worker_succeeded"
+      ]
+    },
+    {
+      "name": "MCP transcript persisted and downloadable",
+      "success": true,
+      "segments": 17,
+      "bytes": 1034
+    },
+    {
+      "name": "Agent summarize_video",
+      "success": true,
+      "seconds": 29.32,
+      "stages": []
+    },
+    {
+      "name": "Agent semantic_search",
+      "success": true,
+      "seconds": 7.04,
+      "stages": []
+    },
+    {
+      "name": "Agent smart_edit",
+      "success": true,
+      "seconds": 6.86,
+      "stages": []
+    },
+    {
+      "name": "Agent export_plan",
+      "success": true,
+      "seconds": 0.62,
+      "stages": [
+        "worker_queued",
+        "worker_running",
+        "worker_succeeded"
+      ]
+    },
+    {
+      "name": "Smart-edit clips downloaded",
+      "success": true,
+      "files": 1,
+      "bytes": [
+        408371
+      ]
+    },
+    {
+      "name": "Agent transcode_video",
+      "success": true,
+      "seconds": 2.28,
+      "stages": [
+        "worker_queued",
+        "worker_running",
+        "worker_succeeded"
+      ]
+    },
+    {
+      "name": "Transcoded artifact downloaded",
+      "success": true,
+      "bytes": 7495105
+    },
+    {
+      "name": "Agent goal tool orchestration",
+      "success": true,
+      "seconds": 15.28,
+      "stages": [
+        "planning",
+        "tool_completed",
+        "tool_started",
+        "worker_queued",
+        "worker_succeeded"
+      ]
+    },
+    {
+      "name": "Native MCP output codecs inspected",
+      "success": true,
+      "artifacts": 3
+    }
+  ],
+  "session_id": "full-test-967cca5d13",
+  "media_id": "a2fc18bbc3f76b9862ac582321a9c04c",
+  "success": true
+}

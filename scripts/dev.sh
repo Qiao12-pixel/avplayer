@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Single local entry point for the agent service, Web gateway, media service
-# and Vite Web client. Docker/Compose is available in deploy/.
+# Local startup: unified C++ server, Python Agent, MCP and Vite.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -35,15 +34,13 @@ export AVPLAYER_MCP_URL="${AVPLAYER_MCP_URL:-http://127.0.0.1:$AVPLAYER_MCP_PORT
 export PYTHONPATH="$ROOT/services/agent${PYTHONPATH:+:$PYTHONPATH}"
 
 WITH_MCP=1
-WITH_MEDIA=1
 WITH_WEB=1
 for arg in "$@"; do
   case "$arg" in
     --no-mcp) WITH_MCP=0 ;;
-    --no-media) WITH_MEDIA=0 ;;
     --no-web) WITH_WEB=0 ;;
     -h|--help)
-      echo "Usage: $0 [--no-media] [--no-web] [--no-mcp]"
+      echo "Usage: $0 [--no-web] [--no-mcp]"
       exit 0
       ;;
     *)
@@ -78,7 +75,7 @@ $AVPLAYER_AGENT_PORT agent
 $([[ "$WITH_MCP" == "1" ]] && echo "$AVPLAYER_MCP_PORT mcp")
 $AVPLAYER_WEB_GATEWAY_PORT gateway
 ${AVPLAYER_DATA_SERVER_ADDRESS##*:} data
-$([[ "$WITH_MEDIA" == "1" ]] && echo "${AVPLAYER_MEDIA_SERVER_ADDRESS##*:} media")
+${AVPLAYER_MEDIA_SERVER_ADDRESS##*:} media-internal
 $([[ "$WITH_WEB" == "1" ]] && echo "5173 web")
 EOF
   if [[ -n "$busy" ]]; then
@@ -90,16 +87,16 @@ EOF
   fi
 }
 
-GATEWAY_BIN="${AVPLAYER_GATEWAY_BIN:-$BUILD_DIR/services/gateway/web_gateway}"
-if [[ ! -x "$GATEWAY_BIN" ]]; then
-  echo "C++ gateway not built: $GATEWAY_BIN" >&2
-  echo "cmake --build $BUILD_DIR --target web_gateway" >&2
+SERVER_BIN="${AVPLAYER_SERVER_BIN:-$BUILD_DIR/services/server/avplayer_server}"
+if [[ ! -x "$SERVER_BIN" ]]; then
+  echo "C++ server not built: cmake --build $BUILD_DIR --target avplayer_server" >&2
   exit 1
 fi
 if [[ "$WITH_MCP" == "1" && ! -x "$AVPLAYER_MCP_BIN" ]]; then
   echo "MCP binary not built; run scripts/build_mcp.sh or use --no-mcp for an external server" >&2
   exit 1
 fi
+
 check_ports
 
 PIDS=""
@@ -126,29 +123,19 @@ echo "agent    127.0.0.1:${AVPLAYER_AGENT_PORT}"
 "$PYTHON" -m avplayer_agent &
 PIDS="$PIDS $!"
 
-echo "gateway  127.0.0.1:${AVPLAYER_WEB_GATEWAY_PORT} -> ${AVPLAYER_MEDIA_SERVER}"
-"$GATEWAY_BIN" &
+echo "server   HTTP ${AVPLAYER_WEB_GATEWAY_PORT}, gRPC ${AVPLAYER_DATA_SERVER_ADDRESS}, media ${AVPLAYER_MEDIA_SERVER_ADDRESS}"
+"$SERVER_BIN" &
 PIDS="$PIDS $!"
 
 
-if [[ "$WITH_MEDIA" == "1" ]]; then
-  MEDIA_BIN="$BUILD_DIR/services/media/media_server"
-  if [[ -x "$MEDIA_BIN" ]]; then
-    echo "media    ${AVPLAYER_MEDIA_SERVER_ADDRESS}"
-    "$MEDIA_BIN" &
-    PIDS="$PIDS $!"
-  else
-    echo "media    skipped: $MEDIA_BIN not built" >&2
-    echo "         cmake -S . -B cmake-build-debug && cmake --build cmake-build-debug --target media_server" >&2
-  fi
-fi
+
 
 if [[ "$WITH_WEB" == "1" ]]; then
   if [[ ! -d "$ROOT/apps/web/node_modules" ]]; then
     echo "Installing Web client dependencies..."
     npm --prefix "$ROOT/apps/web" install
   fi
-  echo "web      Vite dev server (open the HTTPS URL it prints)"
+  echo "web      Vite dev server (open the URL it prints)"
   npm --prefix "$ROOT/apps/web" run dev &
   PIDS="$PIDS $!"
 fi

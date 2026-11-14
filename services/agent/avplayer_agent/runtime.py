@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import subprocess
@@ -104,6 +105,7 @@ class AgentRuntime:
         # that they are plain ffmpeg wrappers with no local-UI dependency.
         self._tool_executor = tool_executor
         self.external_tools = None
+        self.result_store = None
         self.tools: list[dict[str, Any]] = []
         root = project_root()
         config_path = root / "config" / "secret_key.yaml"
@@ -353,7 +355,9 @@ class AgentRuntime:
         return result
 
     def _transcript(self, session_id: str, require_timestamps: bool = False) -> dict[str, Any]:
-        value = self._require_cpp("get_transcript", {}, session_id)
+        value = self.result_store('get', 'transcribe_subtitle') if self.result_store else None
+        if value is None:
+            value = self._require_cpp("get_transcript", {}, session_id)
         if not value.get("text"):
             raise RuntimeError("请先转写字幕，或在视频旁放置同名 .srt/.txt 文件。")
         if len(value["text"]) > 20000:
@@ -370,6 +374,11 @@ class AgentRuntime:
 
         transcript = self._transcript(session_id, tool == "smart_edit")
         text = transcript["text"]
+        variant = hashlib.sha256((self.provider + "\n" + text).encode()).hexdigest()
+        if tool == "summarize_video" and self.result_store:
+            cached = self.result_store('get', tool, variant=variant)
+            if cached:
+                return {**cached, 'cached': True}
         if tool == "summarize_video":
             prompt = "仅依据字幕生成中文视频摘要，按主题列出重点，不要编造画面信息。"
             user = "字幕：\n" + text
@@ -393,7 +402,10 @@ class AgentRuntime:
             raise RuntimeError("媒体已切换，请针对当前视频重新操作。")
         result = _content(response)
         if tool != "smart_edit":
-            return {"success": True, "result": result}
+            payload = {"success": True, "result": result}
+            if tool == "summarize_video" and result.strip() and self.result_store:
+                payload['persistence'] = self.result_store('put', tool, payload=dict(payload), variant=variant)
+            return payload
         segments = _json_object(result).get("segments", [])
         if not isinstance(segments, list):
             raise ValueError("模型返回的剪辑片段格式错误")
@@ -407,6 +419,9 @@ class AgentRuntime:
         context = self._require_cpp("get_media_context", {}, session_id)
         if not context.get("loaded"):
             raise RuntimeError("字幕转写仅支持已打开/已上传的视频。")
+        cached = self.result_store('get', 'transcribe_subtitle') if self.result_store else None
+        if cached:
+            return {**cached, 'cached': True}
         source = Path(context.get("path", ""))
         if self.provider == "cloud" and not self.cloud_speech_configured():
             raise RuntimeError("请在 config/secret_key.yaml 配置 doubao_speech_api_key")
@@ -417,8 +432,11 @@ class AgentRuntime:
         if not segments:
             raise RuntimeError("语音识别未返回带时间戳的字幕。")
         saved = self._require_cpp("save_transcript", {"source_path": str(source), "segments": segments}, session_id)
-        return {"success": True, "result": f"已生成 {len(segments)} 条字幕：{saved.get('path', '')}",
-                "segments": segments}
+        payload = {"success": True, "result": f"已生成 {len(segments)} 条字幕：{saved.get('path', '')}",
+                   "segments": segments}
+        if self.result_store:
+            payload['persistence'] = self.result_store('put', 'transcribe_subtitle', payload=dict(payload))
+        return payload
 
     def _build_graph(self):
         if self._graph is not None:

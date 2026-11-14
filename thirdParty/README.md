@@ -1,3 +1,5 @@
+> 当前已合并：只启动一个 C++ `avplayer_server`（网络、数据、媒体同进程）；`services/media` 仅为内部库，旧 `web_gateway` / `media_server` 程序不再使用。
+
 # 第三方源码模块
 
 MCP/作为普通源码目录纳入AVPlayer，由主仓库直接跟踪，不是Git子模块，不需要单独拉取或推送。

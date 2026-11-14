@@ -1,0 +1,15 @@
+config/
+.env*
+.idea/
+.vscode/
+.venv*/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+cmake-build-*/
+dist/
+data/
+logs/
+*.log
+.DS_Store

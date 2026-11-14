@@ -429,7 +429,7 @@ C++ 媒体实例用 ZooKeeper 临时节点注册，C++ 网关按本地活跃会�
 
 ### 第三方 MCP 模块
 
-MCP已作为Git子模块纳入 `thirdParty/MCP`。首次安装依赖可运行 `scripts/build_mcp.sh --install-deps`（需Conan）；已有依赖运行 `scripts/build_mcp.sh`。
+MCP已作为普通源码目录纳入 `thirdParty/MCP`。首次安装依赖可运行 `scripts/build_mcp.sh --install-deps`（需Conan）；已有依赖运行 `scripts/build_mcp.sh`。
 构建产物位于 `build/mcp`，`scripts/dev.sh` 默认启动仓库内版本。来源与集成边界见 `thirdParty/MCP/UPSTREAM.md`。
 
-MCP为Git子模块，首次检出请执行 `git submodule update --init --recursive`，再执行scripts/build_mcp.sh。子模块版本更新需先推送MCP提交，再提交AVPlayer中的gitlink。
+MCP为普通源码目录，随AVPlayer仓库一起拉取和提交；执行scripts/build_mcp.sh构建，不需要子模块初始化。

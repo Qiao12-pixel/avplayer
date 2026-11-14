@@ -45,9 +45,9 @@ proto保留上传、Agent消息、播放信令/控制以及内部数据接口；
 
 ## 第三方集成
 
-thirdParty/MCP作为Git子模块，作为独立进程构建运行，不直接add_subdirectory混入AVPlayer目标。
-Git子模块地址见.gitmodules，主仓库只记录提交指针；私有配置和构建缓存不提交。
+thirdParty/MCP作为普通源码目录，作为独立进程构建运行，不直接add_subdirectory混入AVPlayer目标。
+主仓库直接跟踪MCP源码；私有配置和构建缓存不提交。
 scripts/build_mcp.sh构建到build/mcp，scripts/dev.sh默认使用该产物。
 可用AVPLAYER_MCP_ROOT、AVPLAYER_MCP_BUILD_DIR、AVPLAYER_MCP_BIN覆盖路径，或--no-mcp连接外部服务。
 
-MCP为Git子模块，首次检出请执行 `git submodule update --init --recursive`，再执行scripts/build_mcp.sh。子模块版本更新需先推送MCP提交，再提交AVPlayer中的gitlink。
+MCP为普通源码目录，随AVPlayer仓库一起拉取和提交；执行scripts/build_mcp.sh构建，不需要子模块初始化。

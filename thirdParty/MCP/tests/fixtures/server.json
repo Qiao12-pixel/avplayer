@@ -1,0 +1,6 @@
+{
+  "server": {"port": 8080},
+  "logging": {"log_file_path": "../logs/server.log", "log_level": "debug", "log_file_size": 52428800, "log_file_count": 5, "log_console_output": true},
+  "thread_pool": {"size": 16, "max_queue_size": 128, "pooled_methods": ["tools/call", "resources/read", "prompts/get"]},
+  "image_generation": {"default_provider": "doubao", "doubao": {"api_key": "", "model": "doubao-seedream-4-5-251128", "api_url": "https://ark.cn-beijing.volces.com/api/v3/images/generations"}, "gemini": {"api_key": "", "model": "gemini-3.1-flash-image-preview"}}
+}

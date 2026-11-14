@@ -63,4 +63,4 @@ AVPLAYER_WEB_HTTP=1仅切换Vite为本机HTTP，默认仍HTTPS。localhost可用
 此测试经Vite同源HTTP/WS验证上传、播放控制、真实WebRTC接收/录制、转写、摘要、字幕搜索、智能剪辑、转码和Agent工具编排。
 它不代替浏览器实际画面、音频播放与截图滤镜的UI验证，也不会验证云端模型凭据。
 
-MCP为Git子模块，首次检出请执行 `git submodule update --init --recursive`，再执行scripts/build_mcp.sh。子模块版本更新需先推送MCP提交，再提交AVPlayer中的gitlink。
+MCP为普通源码目录，随AVPlayer仓库一起拉取和提交；执行scripts/build_mcp.sh构建，不需要子模块初始化。

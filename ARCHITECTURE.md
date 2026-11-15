@@ -130,3 +130,6 @@ Redis/MySQL 连接维持已有启动连接和故障降级机制，此次整理�
 内部 gRPC/ZooKeeper 当前用于可信开发网络，未实现完整生产鉴权；容器运行和公网 WebRTC 需要单独验收。
 
 转写与摘要按媒体ID持久化、缓存回填及复用规则见[RESULT_PERSISTENCE.md](RESULT_PERSISTENCE.md)。
+
+Web天气组件独立于媒体/Agent会话：浏览器每10秒请求统一后端weather接口，后端integrations/mcp模块调用MCP get_weather。
+隐藏页面暂停，不获取用户定位；依赖MCP与Open-Meteo外网可达。

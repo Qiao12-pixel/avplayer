@@ -1,4 +1,5 @@
 import './style.css';
+import { mountWeather } from './weather';
 
 type ControlResult = {
   success: boolean;
@@ -30,7 +31,10 @@ app.innerHTML = `
       <div class="brand-mark">A</div>
       <div class="brand-copy"><h1>AVPlayer</h1><span>AI MEDIA STUDIO</span></div>
     </div>
-    <div class="connection-chip" id="header-status"><i></i><span>未连接</span></div>
+    <div class="topbar-info">
+      <div id="weather-widget" class="weather-inline" aria-label="城市天气"></div>
+      <div class="connection-chip" id="header-status"><i></i><span>未连接</span></div>
+    </div>
   </header>
 
   <main class="workspace">
@@ -193,6 +197,7 @@ const fileInput = $<HTMLInputElement>('file');
 // One identity per page instance, including duplicated tabs. Do not store it in
 // localStorage/sessionStorage: duplicated tabs can inherit those values.
 const sessionBytes = crypto.getRandomValues(new Uint8Array(16));
+const disposeWeather = mountWeather(document.getElementById('weather-widget')!);
 const WEB_SESSION = `web-${Array.from(sessionBytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 sessionInput.value = WEB_SESSION;
 sessionInput.readOnly = true;
@@ -1141,6 +1146,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
 // the UI. Close both sockets when this module is disposed.
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
+    disposeWeather();
     intentionalAgentClose = true;
     agentSocket?.close();
     signalSocket?.close();

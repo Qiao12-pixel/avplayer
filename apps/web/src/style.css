@@ -366,3 +366,16 @@ footer {
 
 .download-link { display: inline-block; margin-top: 6px; color: #93c5fd; font-size: 11px; text-decoration: none; }
 .download-link:hover { color: #bfdbfe; text-decoration: underline; }
+
+.topbar-info { display: flex; align-items: center; gap: 24px; min-width: 0; }
+.weather-inline { display: flex; align-items: center; gap: 10px; white-space: nowrap; color: var(--text); font-size: 13px; }
+.weather-icon { color: #f6c969; font-size: 22px; line-height: 1; width: 24px; text-align: center; }
+.weather-condition { color: var(--muted); }
+.weather-temperature { font-variant-numeric: tabular-nums; }
+@media (max-width: 620px) {
+  .topbar-info { gap: 10px; }
+  .weather-inline { gap: 5px; font-size: 11px; }
+  .weather-icon { font-size: 18px; width: 19px; }
+}
+.weather-city[role="button"] { cursor: pointer; border-radius: 3px; }
+.weather-city[role="button"]:focus-visible { outline: 1px solid var(--muted); outline-offset: 4px; }

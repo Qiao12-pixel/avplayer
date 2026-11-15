@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgrpc++-dev protobuf-compiler protobuf-compiler-grpc libprotobuf-dev \
     qt6-base-dev qt6-multimedia-dev \
     libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev \
-    libopus-dev libssl-dev libzookeeper-mt-dev libboost-dev nlohmann-json3-dev \
+    libopus-dev libcurl4-openssl-dev libssl-dev libzookeeper-mt-dev libboost-dev nlohmann-json3-dev \
     default-libmysqlclient-dev libhiredis-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY proto /src/proto

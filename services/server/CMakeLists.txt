@@ -9,6 +9,7 @@ endif()
 find_package(Boost REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(Threads REQUIRED)
+find_package(CURL REQUIRED)
 find_path(MYSQL_INCLUDE_DIR mysql/mysql.h REQUIRED)
 find_library(MYSQL_LIBRARY NAMES mysqlclient mariadb PATHS /opt/homebrew/opt/mysql/lib REQUIRED)
 find_path(HIREDIS_INCLUDE_DIR hiredis/hiredis.h REQUIRED)
@@ -40,12 +41,13 @@ target_link_libraries(server_rpc PUBLIC server_mysql server_redis server_load_ba
   avplayer_media_service avplayer_proto server_discovery)
 
 add_library(server_network STATIC
+  src/integrations/mcp/WeatherService.cpp
   src/network/common/Url.cpp
   src/network/http/HttpSession.cpp
   src/network/http/HttpServer.cpp
   src/network/websocket/WebSocketSession.cpp)
 target_include_directories(server_network PUBLIC src ${Boost_INCLUDE_DIRS})
-target_link_libraries(server_network PUBLIC server_rpc Threads::Threads)
+target_link_libraries(server_network PUBLIC server_rpc Threads::Threads PRIVATE CURL::libcurl)
 
 add_executable(avplayer_server src/main.cpp src/app/ServerApplication.cpp)
 target_include_directories(avplayer_server PRIVATE src)

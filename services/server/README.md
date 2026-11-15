@@ -85,3 +85,9 @@ ctest --test-dir cmake-build-debug -R server_least_sessions_policy --output-on-f
 HTTP/WS到服务仍通过本进程gRPC桥接，单实例MediaRouter直接调用进程内媒体实现。
 数据库连接沿用启动时建立、故障降级机制，没有在此次整理中增加连接池、自动重连或全异步SQL。
 负载计数仍为当前入口实例本地统计，未增加跨网关共享路由或无缝迁移。
+
+## MCP天气集成
+
+`src/integrations/mcp/WeatherService.*` 负责调用现有MCP get_weather；HTTP层仅分发GET /weather?city=...。
+网络请求在工作池执行，独立Asio上下文设25秒上限，不占用主I/O线程。城市参数限制长度，MCP返回内容仅作为文本传到Web。
+此接口固定调用天气工具，不向浏览器开放任意MCP工具调用。天气不参与媒体或Agent会话。

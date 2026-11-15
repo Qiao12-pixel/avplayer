@@ -523,3 +523,22 @@ AVPLAYER_AI_PROVIDER=local scripts/dev.sh
 ## 转写与摘要持久化
 
 更新后端后会自动创建media_results表，保存同媒体的转写/摘要结果，Redis缓存未命中时从MySQL回填。详见[RESULT_PERSISTENCE.md](RESULT_PERSISTENCE.md)。数据库需在后端启动前可用。
+
+## Web 天气组件
+
+顶部栏提供紧凑天气展示，当前默认北京，仅显示图标、城市、天气和温度。页面可见时每10秒轮询一次，请求未结束时不会叠加；隐藏标签页暂停，恢复后立即查询。
+链路：Web `/weather?city=...`→统一C++后端→现有MCP `get_weather`→Open-Meteo。
+不使用Agent会话、不调用大模型，也不请求浏览器定位权限；后台静默刷新，失败时保留上次数据，不显示刷新日志。
+后端读取AVPLAYER_MCP_URL（默认http://127.0.0.1:8081/jsonrpc），当前天气代理只支持内部HTTP地址；公网HTTPS由外部代理处理。
+修改后重建avplayer_server并重启后端；Vite修改配置后需重启，生产Web需重新构建。
+
+```sh
+cmake --build cmake-build-debug --target avplayer_server -j4
+npm --prefix apps/web run build
+node tests/weather_widget.mjs
+```
+
+天气自动定位：浏览器授权后获取粗略位置，坐标降至0.1度后发送本机/location，由后端调用OpenStreetMap Nominatim反查城市，再通过MCP天气工具查询。
+拒绝或失败时保留北京/上次城市，点击城市可重试。只申请一次，不持续跟踪；不把城市反查加入10秒轮询。
+反查结果按粗略坐标缓存，后端串行限速；服务地址可用AVPLAYER_GEOCODER_URL更换。公共Nominatim使用限制见其Usage Policy，规模化部署应换为自建或获授权地理服务。
+定位服务需要浏览器安全上下文及权限；本次测试仅用公开城市中心坐标和模拟授权回调，没有读取用户真实位置。

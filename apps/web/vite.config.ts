@@ -20,6 +20,14 @@ export default defineConfig({
         target: process.env.AVPLAYER_WEB_GATEWAY_HTTP ?? 'http://127.0.0.1:50065',
         changeOrigin: true,
       },
+      '/location': {
+        target: process.env.AVPLAYER_WEB_GATEWAY_HTTP ?? 'http://127.0.0.1:50065',
+        changeOrigin: true,
+      },
+      '/weather': {
+        target: process.env.AVPLAYER_WEB_GATEWAY_HTTP ?? 'http://127.0.0.1:50065',
+        changeOrigin: true,
+      },
       '/config': {
         target: process.env.AVPLAYER_WEB_GATEWAY_HTTP ?? 'http://127.0.0.1:50065',
         changeOrigin: true,

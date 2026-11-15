@@ -14,3 +14,6 @@ AVPlayer专属Worker和旧工具实现测试已随重复实现删除。
 协议集成测试不代替浏览器画面和声音的人工验收。
 
 result_persistence.py验证真实Redis/MySQL结果快照、跨重启回填、同媒体复用以及真实转写/摘要自动保存，使用独立results-*会话。
+
+`node tests/weather_widget.mjs`验证天气组件10秒轮询、不重叠请求、隐藏页面暂停/恢复和销毁清理。
+本轮真实MCP get_weather→Open-Meteo调用已返回天气数据；外部天气服务可用性不作为稳定CI断言。

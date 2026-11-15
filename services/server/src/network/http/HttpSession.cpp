@@ -1,4 +1,5 @@
 #include "HttpSession.h"
+#include "integrations/mcp/WeatherService.h"
 #include "network/websocket/WebSocketSession.h"
 #include "rpc/MediaRouter.h"
 namespace avserver::network {
@@ -193,6 +194,48 @@ public:
           if (req.method() == http::verb::get &&
               target.rfind("/download?", 0) == 0) {
             self->downloadFile(target);
+            return;
+          }
+          if (req.method() == http::verb::get &&
+              target.rfind("/location?", 0) == 0) {
+            net::post(self->workers, [self, target] {
+              json result;
+              try {
+                std::map<std::string, std::string> values;
+                std::stringstream query(target.substr(10));
+                std::string part;
+                while (std::getline(query, part, '&')) {
+                  auto pos = part.find('=');
+                  if (pos != std::string::npos)
+                    values[part.substr(0, pos)] =
+                        DecodeUrl(part.substr(pos + 1));
+                }
+                size_t latEnd = 0, lonEnd = 0;
+                auto lat = std::stod(values.at("lat"), &latEnd),
+                     lon = std::stod(values.at("lon"), &lonEnd);
+                if (latEnd != values.at("lat").size() ||
+                    lonEnd != values.at("lon").size())
+                  throw std::invalid_argument("invalid coordinates");
+                result = avserver::QueryWeatherAt(lat, lon);
+              } catch (const std::exception &) {
+                result = {{"success", false}, {"error", "无效定位坐标"}};
+              }
+              net::post(self->stream.get_executor(), [self, result] {
+                self->reply(result.value("success", false) ? 200 : 502, result);
+              });
+            });
+            return;
+          }
+          if (req.method() == http::verb::get &&
+              target.rfind("/weather?city=", 0) == 0) {
+            auto city =
+                DecodeUrl(target.substr(std::string("/weather?city=").size()));
+            net::post(self->workers, [self, city] {
+              auto result = avserver::QueryWeather(city);
+              net::post(self->stream.get_executor(), [self, result] {
+                self->reply(result.value("success", false) ? 200 : 502, result);
+              });
+            });
             return;
           }
           if (req.method() == http::verb::get && target == "/health") {

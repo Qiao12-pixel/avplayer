@@ -1,4 +1,5 @@
 #include "HttpSession.h"
+#include "events/PlaybackEvents.h"
 #include "integrations/mcp/WeatherService.h"
 #include "network/websocket/WebSocketSession.h"
 #include "rpc/MediaRouter.h"
@@ -234,6 +235,15 @@ public:
               auto result = avserver::QueryWeather(city);
               net::post(self->stream.get_executor(), [self, result] {
                 self->reply(result.value("success", false) ? 200 : 502, result);
+              });
+            });
+            return;
+          }
+          if (req.method() == http::verb::get && target == "/playback-stats") {
+            net::post(self->workers, [self] {
+              auto result = avserver::PlaybackStatistics();
+              net::post(self->stream.get_executor(), [self, result] {
+                self->reply(result.value("success", false) ? 200 : 503, result);
               });
             });
             return;

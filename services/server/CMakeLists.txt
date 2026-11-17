@@ -12,6 +12,15 @@ find_package(Threads REQUIRED)
 find_package(CURL REQUIRED)
 find_path(MYSQL_INCLUDE_DIR mysql/mysql.h REQUIRED)
 find_library(MYSQL_LIBRARY NAMES mysqlclient mariadb PATHS /opt/homebrew/opt/mysql/lib REQUIRED)
+find_path(SERVER_RDKAFKA_INCLUDE_DIR librdkafka/rdkafka.h PATHS /opt/homebrew/opt/librdkafka/include REQUIRED)
+find_library(SERVER_RDKAFKA_LIBRARY rdkafka REQUIRED)
+add_library(server_events STATIC src/events/PlaybackEvents.cpp)
+target_include_directories(server_events PUBLIC src PRIVATE ../../thirdParty/MCP/src ${MYSQL_INCLUDE_DIR})
+target_include_directories(server_events SYSTEM PRIVATE ${SERVER_RDKAFKA_INCLUDE_DIR})
+target_link_libraries(server_events PUBLIC nlohmann_json::nlohmann_json PRIVATE ${MYSQL_LIBRARY} ${SERVER_RDKAFKA_LIBRARY} Threads::Threads)
+target_link_libraries(avplayer_media_service PUBLIC nlohmann_json::nlohmann_json)
+find_path(MYSQL_INCLUDE_DIR mysql/mysql.h REQUIRED)
+find_library(MYSQL_LIBRARY NAMES mysqlclient mariadb PATHS /opt/homebrew/opt/mysql/lib REQUIRED)
 find_path(HIREDIS_INCLUDE_DIR hiredis/hiredis.h REQUIRED)
 find_library(HIREDIS_LIBRARY hiredis REQUIRED)
 # ZooKeeper is private to the unified server; media-core does not depend on it.
@@ -38,7 +47,7 @@ target_include_directories(server_load_balancing PUBLIC src)
 add_library(server_rpc STATIC src/rpc/StorageService.cpp src/rpc/MediaRouter.cpp src/rpc/UploadService.cpp)
 target_include_directories(server_rpc PUBLIC src)
 target_link_libraries(server_rpc PUBLIC server_mysql server_redis server_load_balancing
-  avplayer_media_service avplayer_proto server_discovery)
+  avplayer_media_service avplayer_proto server_discovery server_events)
 
 add_library(server_network STATIC
   src/integrations/mcp/WeatherService.cpp
@@ -47,7 +56,7 @@ add_library(server_network STATIC
   src/network/http/HttpServer.cpp
   src/network/websocket/WebSocketSession.cpp)
 target_include_directories(server_network PUBLIC src ${Boost_INCLUDE_DIRS})
-target_link_libraries(server_network PUBLIC server_rpc Threads::Threads PRIVATE CURL::libcurl)
+target_link_libraries(server_network PUBLIC server_rpc server_events Threads::Threads PRIVATE CURL::libcurl)
 
 add_executable(avplayer_server src/main.cpp src/app/ServerApplication.cpp)
 target_include_directories(avplayer_server PRIVATE src)
@@ -59,3 +68,8 @@ if(BUILD_TESTING)
   target_link_libraries(server_policy_test PRIVATE server_load_balancing)
   add_test(NAME server_least_sessions_policy COMMAND server_policy_test)
 endif()
+
+add_executable(playback_event_consumer src/events/PlaybackConsumer.cpp)
+target_include_directories(playback_event_consumer PRIVATE src ../../thirdParty/MCP/src ${MYSQL_INCLUDE_DIR})
+target_include_directories(playback_event_consumer SYSTEM PRIVATE ${SERVER_RDKAFKA_INCLUDE_DIR})
+target_link_libraries(playback_event_consumer PRIVATE nlohmann_json::nlohmann_json ${MYSQL_LIBRARY} ${SERVER_RDKAFKA_LIBRARY} Threads::Threads)

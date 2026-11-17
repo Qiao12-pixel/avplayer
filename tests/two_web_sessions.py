@@ -100,7 +100,7 @@ def main():
         env=dict(os.environ,PYTHONPATH=str(ROOT/'services/agent'),AVPLAYER_PROJECT_ROOT=str(ROOT),AVPLAYER_STORAGE_ROOT=str(storage),
             AVPLAYER_AGENT_PORT='51061',AVPLAYER_AGENT_SERVER='127.0.0.1:51061',AVPLAYER_DATA_SERVER='127.0.0.1:51066',
             AVPLAYER_DATA_SERVER_ADDRESS='127.0.0.1:51066',AVPLAYER_MEDIA_SERVER_ADDRESS='127.0.0.1:51062',AVPLAYER_WEB_GATEWAY_PORT='51065',
-            AVPLAYER_ZK_HOSTS='',AVPLAYER_REDIS_URL='',AVPLAYER_MYSQL_DSN='')
+            AVPLAYER_ZK_HOSTS='',AVPLAYER_REDIS_URL='',AVPLAYER_MYSQL_DSN=os.environ.get('AVPLAYER_MYSQL_DSN','mysql://avplayer:avplayer@127.0.0.1:3306/avplayer'))
         processes=[];logs=[]
         try:
             for name,command in [('agent',[ROOT/'.venv/bin/python','-m','avplayer_agent']),('server',[ROOT/'cmake-build-debug/services/server/avplayer_server'])]:

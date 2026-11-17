@@ -66,6 +66,9 @@ grpc::Status UploadService::UploadMedia(
     storage.Execute(nullptr, &request, &response);
     handle->set_media_id(id);
     handle->set_size_bytes(size);
+    if (events)
+      events->Record("media.upload_completed", session, id, "",
+                     {{"size_bytes", size}});
     return grpc::Status::OK;
   } catch (const std::exception &e) {
     std::error_code ignored;

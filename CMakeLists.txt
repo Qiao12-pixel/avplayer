@@ -55,23 +55,45 @@ if(APPLE)
     set(OPENSSL_INCLUDE_DIR "/opt/homebrew/opt/openssl@4/include" CACHE PATH "" FORCE)
     include_directories("/opt/homebrew/opt/openssl@4/include")
 endif()
-FetchContent_Declare(
+set(AVPLAYER_LIBDATACHANNEL_SOURCE
+    "${CMAKE_BINARY_DIR}/_deps/libdatachannel-src")
+if(EXISTS "${AVPLAYER_LIBDATACHANNEL_SOURCE}/CMakeLists.txt")
+    set(AVPLAYER_LIBDATACHANNEL_SUBMODULES_COMPLETE TRUE)
+    foreach(submodule IN ITEMS deps/plog deps/usrsctp deps/libsrtp deps/libjuice)
+        if(NOT EXISTS "${AVPLAYER_LIBDATACHANNEL_SOURCE}/${submodule}/CMakeLists.txt")
+            set(AVPLAYER_LIBDATACHANNEL_SUBMODULES_COMPLETE FALSE)
+        endif()
+    endforeach()
+    if(NOT AVPLAYER_LIBDATACHANNEL_SUBMODULES_COMPLETE)
+        find_package(Git REQUIRED)
+        message(STATUS "Initializing missing libdatachannel submodules")
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" submodule update --init --recursive --force
+            WORKING_DIRECTORY "${AVPLAYER_LIBDATACHANNEL_SOURCE}"
+            RESULT_VARIABLE AVPLAYER_LIBDATACHANNEL_SUBMODULE_RESULT
+        )
+        if(NOT AVPLAYER_LIBDATACHANNEL_SUBMODULE_RESULT EQUAL 0)
+            message(FATAL_ERROR "Failed to initialize libdatachannel submodules")
+        endif()
+        foreach(submodule IN ITEMS deps/plog deps/usrsctp deps/libsrtp deps/libjuice)
+            if(NOT EXISTS "${AVPLAYER_LIBDATACHANNEL_SOURCE}/${submodule}/CMakeLists.txt")
+                message(FATAL_ERROR "libdatachannel submodule is incomplete: ${submodule}")
+            endif()
+        endforeach()
+    endif()
+    FetchContent_Declare(
         libdatachannel
-        SOURCE_DIR "${CMAKE_BINARY_DIR}/_deps/libdatachannel-src"
-        # Pinned to a pre-populated checkout rather than GIT_REPOSITORY: in
-        # this sandboxed dev environment, FetchContent's own git-clone
-        # subbuild step repeatedly wiped and re-cloned the 350MB checkout
-        # (including submodules) on every reconfigure, which is slow and,
-        # under this environment's flaky outbound git access, failed more
-        # often than it succeeded. On a normal machine/CI with stable network
-        # access, swap this back to:
-        #   GIT_REPOSITORY https://github.com/paullouisageneau/libdatachannel.git
-        #   GIT_TAG v0.23.1
-        #   GIT_SHALLOW TRUE
-        #   GIT_SUBMODULES_RECURSE TRUE
-        # and delete this SOURCE_DIR line; FetchContent will clone once and
-        # reuse it on subsequent configures like any other dependency.
-)
+        SOURCE_DIR "${AVPLAYER_LIBDATACHANNEL_SOURCE}"
+    )
+else()
+    FetchContent_Declare(
+        libdatachannel
+        GIT_REPOSITORY https://github.com/paullouisageneau/libdatachannel.git
+        GIT_TAG v0.23.1
+        GIT_SHALLOW TRUE
+        GIT_SUBMODULES_RECURSE TRUE
+    )
+endif()
 FetchContent_MakeAvailable(libdatachannel)
 
 # ---------------------------------------------------------------------------
@@ -183,6 +205,7 @@ find_package(glfw3 REQUIRED)
 # ---------------------------------------------------------------------------
 # Deployment units
 # ---------------------------------------------------------------------------
+find_package(nlohmann_json CONFIG REQUIRED)
 add_subdirectory(proto)
 add_subdirectory(libs/media-core)
 

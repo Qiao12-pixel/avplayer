@@ -17,3 +17,5 @@
 全链路验证修订：export_video 的模型schema明确要求start_ms/end_ms，随机导出工具明确要求duration_ms，避免模型漏传区间后反复执行失败。
 
 当前源码包含独立媒体工具及AVPlayer集成修订；config目录由本目录.gitignore忽略。
+
+2026-11-16本地修改：MCP任务调度接入rabbitmq-c、librdkafka，新增SQLite任务仓储/事务发件箱、Kafka审计消费者，移除媒体业务内存队列。

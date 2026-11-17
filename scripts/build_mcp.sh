@@ -10,4 +10,4 @@ if [[ "${1:-}" == "--install-deps" ]]; then
   shift
 fi
 cmake -S "$MCP_ROOT" -B "$MCP_BUILD" -DCMAKE_BUILD_TYPE=Debug -DMCP_ENABLE_AVPLAYER=ON "$@"
-cmake --build "$MCP_BUILD" --target MCP_Server -j "${CMAKE_BUILD_PARALLEL_LEVEL:-4}"
+cmake --build "$MCP_BUILD" --target MCP_Server mcp_event_consumer -j "${CMAKE_BUILD_PARALLEL_LEVEL:-4}"

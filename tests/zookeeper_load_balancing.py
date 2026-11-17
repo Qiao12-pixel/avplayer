@@ -67,7 +67,7 @@ def main():
                     AVPLAYER_WEB_GATEWAY_PORT='50465',
                     AVPLAYER_DATA_SERVER='127.0.0.1:50466',
                     AVPLAYER_DATA_SERVER_ADDRESS='127.0.0.1:50466',
-                    AVPLAYER_MYSQL_DSN='', AVPLAYER_REDIS_URL='')
+                    AVPLAYER_MYSQL_DSN=os.environ.get('AVPLAYER_MYSQL_DSN','mysql://avplayer:avplayer@127.0.0.1:3306/avplayer'), AVPLAYER_REDIS_URL='')
         try:
             start(BUILD/'services/server/avplayer_server', dict(base, AVPLAYER_MEDIA_SERVER_ADDRESS='127.0.0.1:50460', AVPLAYER_MEDIA_ADVERTISE='127.0.0.1:50460', AVPLAYER_SERVER_REGISTER='0'), folder/'gateway.log')
             wait(lambda: health())

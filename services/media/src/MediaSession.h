@@ -4,8 +4,8 @@
 #include <atomic>
 #include <functional>
 #include <memory>
-#include <string>
 #include <mutex>
+#include <string>
 #include <thread>
 
 #include <rtc/rtc.hpp>
@@ -24,70 +24,77 @@ namespace av {
 // instead of a local Qt widget. See the project plan, Phase 2 Checkpoint B.
 class MediaSession final : public IFileReader::Listener {
 public:
-    using SignalSender = std::function<void(const std::string& kind, const std::string& sdp,
-                                             const std::string& candidate, const std::string& mid)>;
+  using SignalSender =
+      std::function<void(const std::string &kind, const std::string &sdp,
+                         const std::string &candidate, const std::string &mid)>;
 
-    MediaSession(std::string sessionId, std::string mediaId, std::string mediaPath);
-    ~MediaSession() override;
+  MediaSession(std::string sessionId, std::string mediaId,
+               std::string mediaPath);
+  ~MediaSession() override;
 
-    // Wires signaling output (answer SDP / local ICE candidates) to the
-    // caller, who forwards them over the gRPC Signal stream.
-    void SetSignalSender(SignalSender sender);
+  // Wires signaling output (answer SDP / local ICE candidates) to the
+  // caller, who forwards them over the gRPC Signal stream.
+  void SetSignalSender(SignalSender sender);
+  void
+  SetConnectionObserver(std::function<void(const std::string &)> observer) {
+    m_connectionObserver = std::move(observer);
+  }
 
-    // Processes a client offer, opens the local file, starts playback, and
-    // (asynchronously, via SignalSender) emits the answer + ICE candidates.
-    bool HandleRemoteOffer(const std::string& sdp);
-    void AddRemoteCandidate(const std::string& candidate, const std::string& mid);
+  // Processes a client offer, opens the local file, starts playback, and
+  // (asynchronously, via SignalSender) emits the answer + ICE candidates.
+  bool HandleRemoteOffer(const std::string &sdp);
+  void AddRemoteCandidate(const std::string &candidate, const std::string &mid);
 
-    struct PlaybackStatus {
-        double durationMs{0.0};
-        double positionMs{0.0};
-        bool playing{false};
-        bool recording{false};
-        std::string outputPath;
-    };
+  struct PlaybackStatus {
+    double durationMs{0.0};
+    double positionMs{0.0};
+    bool playing{false};
+    bool recording{false};
+    std::string outputPath;
+  };
 
-    // action: "play" | "pause" | "seek" | "status" | "record_start" |
-    // "record_stop". position is 0..1 for "seek".
-    bool Control(const std::string& action, float position,
-                 PlaybackStatus* status, std::string* error);
+  // action: "play" | "pause" | "seek" | "status" | "record_start" |
+  // "record_stop". position is 0..1 for "seek".
+  bool Control(const std::string &action, float position,
+               PlaybackStatus *status, std::string *error);
 
-    void OnFileReaderNotifyAudioSamples(std::shared_ptr<IAudioSamples>) override;
-    void OnFileReaderNotifyVideoFrame(std::shared_ptr<IVideoFrame>) override;
-    void OnFileReaderNotifyAudioFinished() override;
-    void OnFileReaderNotifyVideoFinished() override;
+  void OnFileReaderNotifyAudioSamples(std::shared_ptr<IAudioSamples>) override;
+  void OnFileReaderNotifyVideoFrame(std::shared_ptr<IVideoFrame>) override;
+  void OnFileReaderNotifyAudioFinished() override;
+  void OnFileReaderNotifyVideoFinished() override;
 
 private:
-    void TickLoop();
+  void TickLoop();
 
-    std::string m_sessionId;
-    std::string m_mediaId;
-    std::string m_mediaPath;
-    SignalSender m_signalSender;
+  std::string m_sessionId;
+  std::string m_mediaId;
+  std::string m_mediaPath;
+  SignalSender m_signalSender;
+  std::function<void(const std::string &)> m_connectionObserver;
 
-    std::shared_ptr<rtc::PeerConnection> m_peerConnection;
-    bool m_answerSent{false};
-    std::shared_ptr<rtc::Track> m_videoTrack;
-    std::shared_ptr<rtc::Track> m_audioTrack;
-    std::unique_ptr<WebRtcFrameSink> m_frameSink;
-    std::unique_ptr<WebRtcAudioSink> m_audioSink;
+  std::shared_ptr<rtc::PeerConnection> m_peerConnection;
+  bool m_answerSent{false};
+  std::shared_ptr<rtc::Track> m_videoTrack;
+  std::shared_ptr<rtc::Track> m_audioTrack;
+  std::unique_ptr<WebRtcFrameSink> m_frameSink;
+  std::unique_ptr<WebRtcAudioSink> m_audioSink;
 
-    std::unique_ptr<IFileReader> m_fileReader;
-    AVSynchronizer m_synchronizer;
+  std::unique_ptr<IFileReader> m_fileReader;
+  AVSynchronizer m_synchronizer;
 
-    std::atomic<bool> m_running{false};
-    std::atomic<bool> m_playing{false};
-    std::atomic<double> m_lastPositionSeconds{0.0};
-    std::thread m_tickThread;
+  std::atomic<bool> m_running{false};
+  std::atomic<bool> m_playing{false};
+  std::atomic<double> m_lastPositionSeconds{0.0};
+  std::thread m_tickThread;
 
-    bool StartRecording(std::string* error);
-    bool StopRecording(std::string* outputPath, std::string* error);
+  bool StartRecording(std::string *error);
+  bool StopRecording(std::string *outputPath, std::string *error);
 
-    mutable std::mutex m_recordMutex;
-    std::unique_ptr<IRecordSession> m_recordSession;
-    std::string m_recordingOutputPath;
+  mutable std::mutex m_recordMutex;
+  std::unique_ptr<IRecordSession> m_recordSession;
+  std::string m_recordingOutputPath;
 };
 
-}
+} // namespace av
 
 #endif // AV_STREAMING_MEDIASESSION_H

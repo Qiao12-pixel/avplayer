@@ -6,12 +6,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     qt6-base-dev qt6-multimedia-dev \
     libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev \
     libopus-dev libcurl4-openssl-dev libssl-dev libzookeeper-mt-dev libboost-dev nlohmann-json3-dev \
-    default-libmysqlclient-dev libhiredis-dev && rm -rf /var/lib/apt/lists/*
+    default-libmysqlclient-dev libhiredis-dev libsqlite3-dev librdkafka-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY proto /src/proto
 COPY libs /src/libs
 COPY services/media /src/services/media
 COPY services/server /src/services/server
+COPY thirdParty/MCP/src/persistence /src/thirdParty/MCP/src/persistence
 RUN cmake -S services/server -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    && cmake --build /build --target avplayer_server -j2
+    && cmake --build /build --target avplayer_server playback_event_consumer -j2
 ENTRYPOINT ["/build/avplayer_server"]

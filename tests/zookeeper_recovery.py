@@ -59,7 +59,7 @@ def main():
         env=dict(os.environ,AVPLAYER_ZK_HOSTS='127.0.0.1:52182',AVPLAYER_ZK_MEDIA_PATH='/recovery/media',
                  AVPLAYER_MEDIA_SERVER_ADDRESS='127.0.0.1:50562',AVPLAYER_MEDIA_ADVERTISE='127.0.0.1:50562',
                  AVPLAYER_DATA_SERVER_ADDRESS='127.0.0.1:50566',AVPLAYER_DATA_SERVER='127.0.0.1:50566',
-                 AVPLAYER_WEB_GATEWAY_PORT='50565',AVPLAYER_STORAGE_ROOT=str(path/'storage'),AVPLAYER_MYSQL_DSN='',AVPLAYER_REDIS_URL='')
+                 AVPLAYER_WEB_GATEWAY_PORT='50565',AVPLAYER_STORAGE_ROOT=str(path/'storage'),AVPLAYER_MYSQL_DSN=os.environ.get('AVPLAYER_MYSQL_DSN','mysql://avplayer:avplayer@127.0.0.1:3306/avplayer'),AVPLAYER_REDIS_URL='')
         try:
             zk=start_zk()
             launch([str(build/'services/server/avplayer_server')],env,name='gateway')

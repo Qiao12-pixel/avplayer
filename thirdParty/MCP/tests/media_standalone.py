@@ -15,7 +15,7 @@ def main():
         media=store/'standalone'/'video';media.mkdir(parents=True)
         subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','testsrc2=size=320x180:rate=30','-f','lavfi','-i','sine=frequency=1000','-t','6','-c:v','libx264','-c:a','aac',str(media/'original.mp4')],check=True)
         config=directory/'config.json';config.write_text(json.dumps({'server':{'port':50781},'logging':{'log_file_path':str(directory/'server.log'),'log_console_output':False},'job_agent':{'db_path':str(directory/'jobs.db')}}))
-        env=dict(os.environ,AVPLAYER_STORAGE_ROOT=str(store),MCP_MEDIA_ROOT=str(ROOT),AVPLAYER_DATA_SERVER='127.0.0.1:1',AVPLAYER_WORKER_SERVERS='127.0.0.1:1')
+        env=dict(os.environ,AVPLAYER_STORAGE_ROOT=str(store),MCP_MEDIA_ROOT=str(ROOT),AVPLAYER_MYSQL_DSN=os.environ.get('AVPLAYER_MYSQL_DSN','mysql://avplayer:avplayer@127.0.0.1:3306/avplayer'),AVPLAYER_DATA_SERVER='127.0.0.1:1',AVPLAYER_WORKER_SERVERS='127.0.0.1:1')
         log=open(directory/'process.log','w')
         process=subprocess.Popen([str(Path(os.environ.get('AVPLAYER_MCP_BIN',ROOT.parents[1]/'build/mcp/MCP_Server'))),'--config',str(config),'--host','127.0.0.1','--port','50781'],env=env,cwd=directory,stdout=log,stderr=subprocess.STDOUT)
         def rpc(method,params):

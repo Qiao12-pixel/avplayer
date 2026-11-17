@@ -18,7 +18,7 @@ def main():
         path=Path(tmp);folder=path/'storage'/'agent-mcp'/'speech';folder.mkdir(parents=True)
         os.link(ROOT/'resource/input.mp4',folder/'original.mp4')
         config=path/'mcp.json';config.write_text(json.dumps({'server':{'port':50881},'logging':{'log_file_path':str(path/'mcp.log'),'log_console_output':False},'job_agent':{'db_path':str(path/'jobs.db')}}))
-        env=dict(os.environ,AVPLAYER_PROJECT_ROOT=str(ROOT),MCP_MEDIA_ROOT=str(mcp),AVPLAYER_STORAGE_ROOT=str(path/'storage'),AVPLAYER_MCP_URL='http://127.0.0.1:50881/jsonrpc',AVPLAYER_DATA_SERVER='127.0.0.1:1',AVPLAYER_WORKER_SERVERS='127.0.0.1:1',AVPLAYER_WORKER_PYTHON=str(ROOT/'.venv/bin/python'),PYTHONPATH=str(ROOT/'services/agent'),AVPLAYER_AGENT_PORT='50861',AVPLAYER_AI_PROVIDER='local')
+        env=dict(os.environ,AVPLAYER_PROJECT_ROOT=str(ROOT),MCP_MEDIA_ROOT=str(mcp),AVPLAYER_STORAGE_ROOT=str(path/'storage'),AVPLAYER_MCP_URL='http://127.0.0.1:50881/jsonrpc',AVPLAYER_MYSQL_DSN=os.environ.get('AVPLAYER_MYSQL_DSN','mysql://avplayer:avplayer@127.0.0.1:3306/avplayer'),AVPLAYER_DATA_SERVER='127.0.0.1:1',AVPLAYER_WORKER_SERVERS='127.0.0.1:1',AVPLAYER_WORKER_PYTHON=str(ROOT/'.venv/bin/python'),PYTHONPATH=str(ROOT/'services/agent'),AVPLAYER_AGENT_PORT='50861',AVPLAYER_AI_PROVIDER='local')
         procs=[];logs=[]
         try:
             for name,cmd in [('mcp',[Path(os.environ.get('AVPLAYER_MCP_BIN', ROOT/'build/mcp/MCP_Server')),'--config',config,'--host','127.0.0.1','--port','50881']),('agent',[ROOT/'.venv/bin/python','-m','avplayer_agent'])]:

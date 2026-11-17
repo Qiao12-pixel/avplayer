@@ -1,3 +1,5 @@
+> 数据库实现已更新：任务仓储、租约、事件发件箱、统计投影和MCP历史统一使用MySQL；旧SQLite说明仅为历史。当前权威配置、迁移步骤和执行隔离语义见 [deploy/mysql/README.md](deploy/mysql/README.md)。
+
 # AVPlayer 项目结构与运行架构
 
 ## 1. 系统组成
@@ -126,6 +128,7 @@ Redis/MySQL 连接维持已有启动连接和故障降级机制，此次整理�
 完整构建与启动步骤见 [STARTUP.md](STARTUP.md)。
 后端模块导航见 [services/server/README.md](services/server/README.md)。
 多实例与故障测试见 [deploy/ZOOKEEPER.md](deploy/ZOOKEEPER.md)。
+源码目录导航：[`services/server/src`](services/server/src/README.md)、[`services/agent/avplayer_agent`](services/agent/avplayer_agent/README.md)、[`thirdParty/MCP/src`](thirdParty/MCP/src/README.md)、[`libs/media-core`](libs/media-core/README.md)、[`proto`](proto/README.md) 和 [`apps/desktop`](apps/desktop/README.md)。
 
 内部 gRPC/ZooKeeper 当前用于可信开发网络，未实现完整生产鉴权；容器运行和公网 WebRTC 需要单独验收。
 
@@ -133,3 +136,17 @@ Redis/MySQL 连接维持已有启动连接和故障降级机制，此次整理�
 
 Web天气组件独立于媒体/Agent会话：浏览器每10秒请求统一后端weather接口，后端integrations/mcp模块调用MCP get_weather。
 隐藏页面暂停，不获取用户定位；依赖MCP与Open-Meteo外网可达。
+
+## 消息系统更新
+
+MCP耗时任务不再使用进程内业务队列：RabbitMQ负责分发，Kafka承载任务状态事件，MySQL任务仓储和事务发件箱负责重启恢复与可靠发布。AVPlayer与MCP共享MySQL，任务租约及执行版本用于拒绝过期Worker回写。
+源码在thirdParty/MCP/src/messaging，媒体工具API保持不变。
+新增mcp_event_consumer进程记录审计事件；模型编排、实时播放链路不变。
+配置、同机部署边界和验证见[MESSAGING.md](MESSAGING.md)。
+
+## 后端Kafka播放事件与统计
+
+统一C++后端的events模块收集上传、播放生命周期、控制、录制和AI结果保存事件，通过MySQL持久发件箱发送Kafka。
+媒体模块仅提供事件回调，不直接依赖broker；不逐包上报，也不改变WebRTC传输路径。
+独立playback_event_consumer消费avplayer.playback.events，完成事件去重、分钟计数和会话统计，/playback-stats读取MySQL投影。
+MCP继续使用RabbitMQ分发耗时任务；其任务事件主题与播放事件主题分开。Kafka回放可重建统计，具体指标语义和单机边界见MESSAGING.md。

@@ -54,6 +54,11 @@ grpc::Status StorageService::Execute(grpc::ServerContext *,
         auto cached = value;
         cached["action"] = "result_cache_put";
         bool hit = cache.Execute(cached) == true;
+        if (events)
+          events->Record(
+              saved ? "ai.result_persisted" : "ai.result_persistence_failed",
+              session, media, "",
+              {{"task", task}, {"mysql_saved", saved}, {"redis_cached", hit}});
         // Refresh legacy subtitle tables/cache as well for existing data
         // consumers.
         if (task == "transcribe_subtitle") {

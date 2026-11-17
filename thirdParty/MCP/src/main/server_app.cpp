@@ -76,10 +76,10 @@ namespace mcp {
 
         try {
             auto history_repository =
-                std::make_shared<sql::ToolCallHistoryRepository>("data/tool_call_history.sqlite3");
+                std::make_shared<sql::ToolCallHistoryRepository>("mysql:tool_call_history");
             history_repository->Initialize();
             mcp_server.SetToolCallHistoryRepository(history_repository);
-            MCP_LOG_INFO("Tool call history database enabled: {}", history_repository->DatabasePath().string());
+            MCP_LOG_INFO("MySQL tool call history enabled (legacy config label: {})", history_repository->DatabasePath().string());
         } catch (const std::exception& e) {
             MCP_LOG_WARN("Tool call history database disabled: {}", e.what());
         }

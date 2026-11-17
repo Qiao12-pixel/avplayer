@@ -1,3 +1,5 @@
+> 数据库实现已更新：任务仓储、租约、事件发件箱、统计投影和MCP历史统一使用MySQL；旧SQLite说明仅为历史。当前权威配置、迁移步骤和执行隔离语义见 AVPlayer根目录deploy/mysql/README.md。
+
 # 统一 C++ 后端：代码模块说明
 
 所有模块链接为一个 `avplayer_server` 进程。模块化用于约束代码职责，不拆成额外网络服务。
@@ -30,6 +32,7 @@ services/server/
     ├── storage/
     │   ├── redis/RedisCache.*        # Redis连接、TTL字幕缓存和缓存键
     │   └── mysql/MySqlRepository.*   # MySQL连接、建表、查询及字幕事务
+    ├── events/                     # Kafka发件箱、播放事件和统计消费者
     ├── discovery/
     │   └── zookeeper/Registry.*      # 后端注册发现、Watch与恢复
     └── load_balancing/
@@ -91,3 +94,9 @@ HTTP/WS到服务仍通过本进程gRPC桥接，单实例MediaRouter直接调用�
 `src/integrations/mcp/WeatherService.*` 负责调用现有MCP get_weather；HTTP层仅分发GET /weather?city=...。
 网络请求在工作池执行，独立Asio上下文设25秒上限，不占用主I/O线程。城市参数限制长度，MCP返回内容仅作为文本传到Web。
 此接口固定调用天气工具，不向浏览器开放任意MCP工具调用。天气不参与媒体或Agent会话。
+
+## 播放事件模块
+
+src/events/PlaybackEvents封装后端持久发件箱、Kafka异步交付和心跳；src/events/PlaybackConsumer负责事件去重、分钟统计和会话投影。
+媒体模块只经EventSink回调上报，network/rpc产生上传和结果保存事件，不发送音视频包或status轮询。
+GET /playback-stats读取配置的本地统计库；目标playback_event_consumer由开发脚本启动，回放支持新消费组和新统计库。

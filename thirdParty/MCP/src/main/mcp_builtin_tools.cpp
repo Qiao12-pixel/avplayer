@@ -1739,12 +1739,12 @@ namespace mcp {
 
         {
             auto history_repository =
-                std::make_shared<sql::ToolCallHistoryRepository>("data/tool_call_history.sqlite3");
+                std::make_shared<sql::ToolCallHistoryRepository>("mysql:tool_call_history");
             history_repository->Initialize();
 
             Tool tool;
             tool.name = "query_tool_history";
-            tool.description = "Query recent MCP tool call history from SQLite";
+            tool.description = "Query recent MCP tool call history from MySQL";
             tool.input_schema.properties = {
                 {"tool_name", {{"type", "string"}, {"description", "Optional tool name filter"}, {"default", ""}}},
                 {"errors_only", {{"type", "boolean"}, {"description", "Return only failing tool calls"}, {"default", false}}},

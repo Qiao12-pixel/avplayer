@@ -1,3 +1,5 @@
+> 数据库实现已更新：任务仓储、租约、事件发件箱、统计投影和MCP历史统一使用MySQL；旧SQLite说明仅为历史。当前权威配置、迁移步骤和执行隔离语义见 AVPlayer根目录deploy/mysql/README.md。
+
 > 本目录是AVPlayer纳入的第三方源码快照，来源与本地修订见 [UPSTREAM.md](UPSTREAM.md)。
 > 在AVPlayer根目录用 scripts/build_mcp.sh 构建，默认产物位于build/mcp。私有配置不随模块分发。
 

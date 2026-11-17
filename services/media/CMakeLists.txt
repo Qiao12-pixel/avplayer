@@ -11,6 +11,7 @@ if(NOT TARGET avplayer_media_core)
     get_filename_component(AVPLAYER_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 
     list(PREPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/grpc" "/opt/homebrew/opt/protobuf")
+    find_package(nlohmann_json CONFIG REQUIRED)
     find_package(Protobuf CONFIG REQUIRED)
     find_package(gRPC CONFIG REQUIRED)
     find_package(Qt6 REQUIRED COMPONENTS Core Multimedia)

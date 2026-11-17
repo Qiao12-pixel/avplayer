@@ -437,3 +437,9 @@ MCP已作为普通源码目录纳入 `thirdParty/MCP`。首次安装依赖可运
 MCP为普通源码目录，随AVPlayer仓库一起拉取和提交；执行scripts/build_mcp.sh构建，不需要子模块初始化。
 
 后端ZooKeeper实现已归入services/server/src/discovery/zookeeper；整体结构见[ARCHITECTURE.md](ARCHITECTURE.md)，从依赖构建到启动见[STARTUP.md](STARTUP.md)。
+
+### RabbitMQ与Kafka
+
+耗时媒体任务使用RabbitMQ持久队列，任务状态以Kafka事件发布，审计消费者保存后提交偏移。
+任务/事件发件箱支持进程重启恢复，不再以进程内业务队列作为执行入口。
+先启动broker再运行scripts/dev.sh，依赖、配置及同机任务仓储边界见[MESSAGING.md](MESSAGING.md)。

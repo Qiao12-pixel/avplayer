@@ -1,6 +1,7 @@
 #include "ServerApplication.h"
-#include "discovery/zookeeper/Registry.h"
 #include "config/Environment.h"
+#include "discovery/zookeeper/Registry.h"
+#include "events/PlaybackEvents.h"
 #include "network/http/HttpServer.h"
 #include "rpc/MediaRouter.h"
 #include "rpc/StorageService.h"
@@ -8,9 +9,15 @@
 #include <iostream>
 int avserver::ServerApplication::Run() {
   try {
-    StorageService storage;
+    PlaybackEvents events;
+    StorageService storage(&events);
     av::StreamingServiceImpl media(
-        Environment("AVPLAYER_STORAGE_ROOT", "storage"));
+        Environment("AVPLAYER_STORAGE_ROOT", "storage"),
+        [&events](const std::string &type, const std::string &session,
+                  const std::string &media, const std::string &playback,
+                  nlohmann::json details) {
+          events.Record(type, session, media, playback, std::move(details));
+        });
     MediaRouter router(media);
     // Private media endpoint is hosted in this same process for cluster
     // routing.
@@ -29,7 +36,7 @@ int avserver::ServerApplication::Run() {
           "AVPLAYER_MEDIA_ADVERTISE required with ZooKeeper");
     av::Registry registration(
         Environment("AVPLAYER_SERVER_REGISTER", "1") == "0" ? "" : advertise);
-    UploadService upload(storage);
+    UploadService upload(storage, &events);
     grpc::ServerBuilder builder;
     builder.AddListeningPort(
         Environment("AVPLAYER_DATA_SERVER_ADDRESS", "127.0.0.1:50066"),

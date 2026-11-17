@@ -25,9 +25,23 @@ export AVPLAYER_MEDIA_ADVERTISE="${AVPLAYER_MEDIA_ADVERTISE:-127.0.0.1:${AVPLAYE
 export AVPLAYER_DATA_SERVER="${AVPLAYER_DATA_SERVER:-localhost:50066}"
 export AVPLAYER_DATA_SERVER_ADDRESS="${AVPLAYER_DATA_SERVER_ADDRESS:-127.0.0.1:50066}"
 export AVPLAYER_WORKER_PYTHON="${AVPLAYER_WORKER_PYTHON:-$PYTHON}"
+# Durable task dispatch and event stream; no in-process fallback.
+export MCP_RABBIT_HOST="${MCP_RABBIT_HOST:-127.0.0.1}"
+export MCP_RABBIT_PORT="${MCP_RABBIT_PORT:-5672}"
+export MCP_RABBIT_QUEUE="${MCP_RABBIT_QUEUE:-avplayer.media.tasks}"
+export MCP_KAFKA_BROKERS="${MCP_KAFKA_BROKERS:-127.0.0.1:9092}"
+export MCP_KAFKA_TOPIC="${MCP_KAFKA_TOPIC:-avplayer.media.events}"
+export MCP_KAFKA_GROUP="${MCP_KAFKA_GROUP:-avplayer-media-audit}"
+# Project-wide playback telemetry is separate from MCP task events.
+export AVPLAYER_KAFKA_BROKERS="${AVPLAYER_KAFKA_BROKERS:-$MCP_KAFKA_BROKERS}"
+export AVPLAYER_KAFKA_TOPIC="${AVPLAYER_KAFKA_TOPIC:-avplayer.playback.events}"
+export AVPLAYER_KAFKA_GROUP="${AVPLAYER_KAFKA_GROUP:-avplayer-playback-stats}"
 export AVPLAYER_MCP_ROOT="${AVPLAYER_MCP_ROOT:-$ROOT/thirdParty/MCP}"
 export AVPLAYER_MCP_BUILD_DIR="${AVPLAYER_MCP_BUILD_DIR:-$ROOT/build/mcp}"
 export AVPLAYER_MCP_BIN="${AVPLAYER_MCP_BIN:-$AVPLAYER_MCP_BUILD_DIR/MCP_Server}"
+export MCP_JOB_LEASE_SECONDS="${MCP_JOB_LEASE_SECONDS:-15}"
+export AVPLAYER_STATS_PROJECTION="${AVPLAYER_STATS_PROJECTION:-playback-v1}"
+export MCP_EVENT_PROJECTION="${MCP_EVENT_PROJECTION:-mcp-audit-v1}"
 export MCP_MEDIA_ROOT="${MCP_MEDIA_ROOT:-$AVPLAYER_MCP_ROOT}"
 export AVPLAYER_MCP_PORT="${AVPLAYER_MCP_PORT:-8081}"
 export AVPLAYER_MCP_URL="${AVPLAYER_MCP_URL:-http://127.0.0.1:$AVPLAYER_MCP_PORT/jsonrpc}"
@@ -92,11 +106,30 @@ if [[ ! -x "$SERVER_BIN" ]]; then
   echo "C++ server not built: cmake --build $BUILD_DIR --target avplayer_server" >&2
   exit 1
 fi
+if [[ ! -x "$BUILD_DIR/services/server/playback_event_consumer" ]]; then
+  echo "Playback statistics consumer not built: cmake --build $BUILD_DIR --target playback_event_consumer" >&2
+  exit 1
+fi
 if [[ "$WITH_MCP" == "1" && ! -x "$AVPLAYER_MCP_BIN" ]]; then
   echo "MCP binary not built; run scripts/build_mcp.sh or use --no-mcp for an external server" >&2
   exit 1
 fi
 
+if [[ "$WITH_MCP" == "1" ]]; then
+  if [[ ! -x "$AVPLAYER_MCP_BUILD_DIR/mcp_event_consumer" ]]; then
+    echo "Kafka event consumer not built: scripts/build_mcp.sh" >&2
+    exit 1
+  fi
+  "$PYTHON" - <<'BROKER_CHECK'
+import os,socket
+for host,port,name in [(os.environ['MCP_RABBIT_HOST'],int(os.environ['MCP_RABBIT_PORT']),'RabbitMQ'),
+                      (*os.environ['MCP_KAFKA_BROKERS'].split(',')[0].rsplit(':',1),'Kafka')]:
+    try:
+        with socket.create_connection((host,int(port)),timeout=2): pass
+    except OSError:
+        raise SystemExit(f'{name} is not reachable at {host}:{port}; start brokers before scripts/dev.sh')
+BROKER_CHECK
+fi
 check_ports
 
 PIDS=""
@@ -117,6 +150,8 @@ if [[ "$WITH_MCP" == "1" ]]; then
   fi
   (cd "$ROOT/cache/mcp" && exec "$AVPLAYER_MCP_BIN" --config "$MCP_CONFIG" --host 127.0.0.1 --port "$AVPLAYER_MCP_PORT") &
   PIDS="$PIDS $!"
+  "$AVPLAYER_MCP_BUILD_DIR/mcp_event_consumer" &
+  PIDS="$PIDS $!"
 fi
 
 echo "agent    127.0.0.1:${AVPLAYER_AGENT_PORT}"
@@ -125,6 +160,8 @@ PIDS="$PIDS $!"
 
 echo "server   HTTP ${AVPLAYER_WEB_GATEWAY_PORT}, gRPC ${AVPLAYER_DATA_SERVER_ADDRESS}, media ${AVPLAYER_MEDIA_SERVER_ADDRESS}"
 "$SERVER_BIN" &
+PIDS="$PIDS $!"
+"$BUILD_DIR/services/server/playback_event_consumer" &
 PIDS="$PIDS $!"
 
 

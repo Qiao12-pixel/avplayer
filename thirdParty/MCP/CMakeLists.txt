@@ -25,7 +25,11 @@ find_package(spdlog REQUIRED)
 find_package(CURL REQUIRED)
 find_package(GTest REQUIRED)
 find_package(httplib REQUIRED)
-find_package(SQLite3 REQUIRED)
+find_path(MCP_SQL_INCLUDE_DIR mysql/mysql.h PATHS /opt/homebrew/opt/mysql/include REQUIRED)
+find_library(MCP_SQL_LIBRARY NAMES mysqlclient mariadb PATHS /opt/homebrew/opt/mysql/lib REQUIRED)
+if(EXISTS "/opt/homebrew/opt/mysql/include/mysql/mysql.h")
+ set(MCP_SQL_INCLUDE_DIR "/opt/homebrew/opt/mysql/include")
+endif()
 find_package(ZooKeeper REQUIRED)
 find_package(Hiredis REQUIRED)
 enable_testing()
@@ -57,8 +61,7 @@ target_link_libraries(mcp_logger PUBLIC
 )
 
 add_library(mcp_sql
-        src/sql/sqlite_database.cpp
-        src/sql/sqlite_database.h
+        src/sql/mysql_database.h
         src/sql/tool_call_history_repository.cpp
         src/sql/tool_call_history_repository.h
 )
@@ -67,8 +70,9 @@ target_include_directories(mcp_sql PUBLIC
         ${PROJECT_SOURCE_DIR}/src
 )
 
+target_include_directories(mcp_sql SYSTEM PUBLIC ${MCP_SQL_INCLUDE_DIR})
 target_link_libraries(mcp_sql PUBLIC
-        SQLite::SQLite3
+        ${MCP_SQL_LIBRARY}
 )
 
 add_library(mcp_jsonrpc
@@ -231,7 +235,7 @@ target_link_libraries(MCP_Server PRIVATE
         mcp_lb
         CURL::libcurl
         httplib::httplib
-        SQLite::SQLite3
+        ${MCP_SQL_LIBRARY}
         spdlog::spdlog
 )
 
@@ -325,12 +329,45 @@ gtest_discover_tests(builtin_tools_tests)
 # Independent native media tools: no AVPlayer source tree or gRPC dependency.
 option(MCP_ENABLE_AVPLAYER "Register native media tools" ON)
 if(MCP_ENABLE_AVPLAYER)
-    add_library(mcp_avplayer_tools_lib src/main/mcp_avplayer_tools.cpp src/media/media_backend.cpp)
-    target_link_libraries(mcp_avplayer_tools_lib PUBLIC mcp_jsonrpc Threads::Threads)
+    find_path(RABBITMQ_INCLUDE_DIR amqp.h PATHS /opt/homebrew/opt/rabbitmq-c/include REQUIRED)
+    find_library(RABBITMQ_LIBRARY NAMES rabbitmq PATHS /opt/homebrew/opt/rabbitmq-c/lib REQUIRED)
+    find_path(RDKAFKA_INCLUDE_DIR librdkafka/rdkafka.h REQUIRED)
+    find_library(RDKAFKA_LIBRARY rdkafka REQUIRED)
+    find_path(MCP_MYSQL_INCLUDE_DIR mysql/mysql.h PATHS /opt/homebrew/opt/mysql/include REQUIRED)
+    if(EXISTS "/opt/homebrew/opt/mysql/include/mysql/mysql.h")
+      set(MCP_MYSQL_INCLUDE_DIR "/opt/homebrew/opt/mysql/include")
+    endif()
+    find_library(MCP_MYSQL_LIBRARY NAMES mysqlclient mariadb PATHS /opt/homebrew/opt/mysql/lib REQUIRED)
+    add_library(mcp_avplayer_tools_lib src/main/mcp_avplayer_tools.cpp src/media/media_backend.cpp
+      src/messaging/JobStore.cpp src/messaging/Brokers.cpp)
+    # Prefer keg-scoped headers so Homebrew JSON cannot shadow Conan JSON ABI.
+    if(EXISTS "/opt/homebrew/opt/librdkafka/include/librdkafka/rdkafka.h")
+      set(RDKAFKA_INCLUDE_DIR "/opt/homebrew/opt/librdkafka/include")
+    endif()
+    if(EXISTS "/opt/homebrew/opt/rabbitmq-c/include/amqp.h")
+      set(RABBITMQ_INCLUDE_DIR "/opt/homebrew/opt/rabbitmq-c/include")
+    endif()
+    target_include_directories(mcp_avplayer_tools_lib SYSTEM PRIVATE ${RABBITMQ_INCLUDE_DIR} ${RDKAFKA_INCLUDE_DIR} ${MCP_MYSQL_INCLUDE_DIR})
+    target_link_libraries(mcp_avplayer_tools_lib PUBLIC mcp_jsonrpc Threads::Threads PRIVATE ${RABBITMQ_LIBRARY} ${RDKAFKA_LIBRARY} ${MCP_MYSQL_LIBRARY})
     add_executable(mcp_media_executor src/media/executor.cpp)
     target_include_directories(mcp_media_executor PRIVATE src/media)
     target_link_libraries(mcp_media_executor PRIVATE nlohmann_json::nlohmann_json Threads::Threads)
     add_dependencies(MCP_Server mcp_media_executor)
     target_link_libraries(MCP_Server PRIVATE mcp_avplayer_tools_lib)
     target_compile_definitions(MCP_Server PRIVATE MCP_WITH_AVPLAYER=1)
+endif()
+
+if(MCP_ENABLE_AVPLAYER)
+  add_executable(mcp_event_consumer src/messaging/EventConsumer.cpp)
+  target_include_directories(mcp_event_consumer PRIVATE src)
+  target_include_directories(mcp_event_consumer SYSTEM PRIVATE ${MCP_MYSQL_INCLUDE_DIR})
+  target_include_directories(mcp_event_consumer SYSTEM PRIVATE ${RDKAFKA_INCLUDE_DIR})
+  target_link_libraries(mcp_event_consumer PRIVATE nlohmann_json::nlohmann_json ${MCP_MYSQL_LIBRARY} ${RDKAFKA_LIBRARY} Threads::Threads)
+endif()
+
+if(MCP_ENABLE_AVPLAYER)
+ add_executable(mysql_lease_test tests/mysql_lease_test.cpp src/messaging/JobStore.cpp)
+ target_include_directories(mysql_lease_test PRIVATE src)
+ target_include_directories(mysql_lease_test SYSTEM PRIVATE ${MCP_SQL_INCLUDE_DIR})
+ target_link_libraries(mysql_lease_test PRIVATE nlohmann_json::nlohmann_json ${MCP_SQL_LIBRARY} Threads::Threads)
 endif()

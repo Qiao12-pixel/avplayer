@@ -1,10 +1,12 @@
 #include "media_backend.h"
 #include "MediaFiles.h"
+#include "messaging/Brokers.h"
+#include "messaging/JobStore.h"
 #include <atomic>
-#include <condition_variable>
-#include <deque>
 #include <fcntl.h>
+#include <functional>
 #include <iomanip>
+#include <iostream>
 #include <map>
 #include <mutex>
 #include <signal.h>
@@ -15,124 +17,228 @@ extern char **environ;
 namespace mcp {
 using namespace avtools;
 struct MediaBackend::Impl {
-  struct Job {
-    json request, status;
-    std::atomic<bool> cancel{false};
-  };
-  std::mutex mutex;
-  std::condition_variable cv;
-  bool stop = false;
-  std::map<std::string, std::shared_ptr<Job>> jobs;
-  std::deque<std::shared_ptr<Job>> queue;
-  std::vector<std::thread> threads;
+  messaging::JobStore store;
+  std::mutex artifacts;
+  std::atomic<bool> stopping{false};
+  std::vector<std::thread> consumers;
+  std::thread publisher, events;
   Impl() {
     auto slots = std::stoul(env("MCP_MEDIA_SLOTS", "2"));
     if (!slots || slots > 32)
       throw std::invalid_argument("invalid MCP_MEDIA_SLOTS");
-    for (size_t i = 0; i < slots; i++)
-      threads.emplace_back([this] { loop(); });
+    publisher = std::thread([this] { publishTasks(); });
+    events = std::thread([this] { publishEvents(); });
+    for (size_t i = 0; i < slots; ++i)
+      consumers.emplace_back([this] { consume(); });
   }
   ~Impl() {
-    {
-      std::lock_guard<std::mutex> lock(mutex);
-      stop = true;
-      for (auto &j : jobs)
-        j.second->cancel = true;
-    }
-    cv.notify_all();
-    for (auto &t : threads)
-      t.join();
+    stopping = true;
+    for (auto &thread : consumers)
+      thread.join();
+    publisher.join();
+    events.join();
   }
-  void loop() {
-    for (;;) {
-      std::shared_ptr<Job> job;
-      {
-        std::unique_lock<std::mutex> lock(mutex);
-        cv.wait(lock, [&] { return stop || !queue.empty(); });
-        if (stop)
-          return;
-        job = queue.front();
-        queue.pop_front();
-        if (job->cancel)
-          continue;
-        job->status["state"] = "running";
-      }
-      json result;
-      std::string error;
-      bool timeout = false;
+  void pause() {
+    for (int i = 0; i < 10 && !stopping; ++i)
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+  void publishTasks() {
+    while (!stopping) {
       try {
-        auto work = mediaDirectory(job->request.at("session_id"),
-                                   job->request.at("media_id")) /
-                    "jobs" / job->request.at("job_id").get<std::string>();
-        fs::create_directories(work);
-        auto input = work / "request.json", output = work / "result.json";
-        atomicWrite(input, job->request.dump());
-        std::vector<std::string> args = {
-            env("MCP_MEDIA_EXECUTOR", "mcp_media_executor"), input.string(),
-            output.string(), std::to_string(getpid())};
-        std::vector<char *> argv;
-        for (auto &arg : args)
-          argv.push_back(arg.data());
-        argv.push_back(nullptr);
-        posix_spawnattr_t attr;
-        posix_spawnattr_init(&attr);
-        posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP);
-        posix_spawnattr_setpgroup(&attr, 0);
-        posix_spawn_file_actions_t actions;
-        posix_spawn_file_actions_init(&actions);
-        auto log = work / "execution.log";
-        posix_spawn_file_actions_addopen(&actions, 1, log.c_str(),
-                                         O_WRONLY | O_CREAT | O_TRUNC, 0600);
-        posix_spawn_file_actions_adddup2(&actions, 1, 2);
-        pid_t pid;
-        auto rc =
-            posix_spawnp(&pid, argv[0], &actions, &attr, argv.data(), environ);
-        posix_spawnattr_destroy(&attr);
-        posix_spawn_file_actions_destroy(&actions);
-        if (rc)
-          throw std::runtime_error("cannot start MCP_MEDIA_EXECUTOR");
-        int code;
-        auto deadline =
-            std::chrono::steady_clock::now() +
-            std::chrono::seconds(job->request.value("timeout_seconds", 600));
-        for (;;) {
-          auto r = waitpid(pid, &code, WNOHANG);
-          if (r == pid)
-            break;
-          if (r < 0) {
-            if (errno == EINTR)
-              continue;
-            throw std::runtime_error("wait failed");
+        messaging::Rabbit broker;
+        while (!stopping) {
+          auto tasks = store.Pending();
+          for (auto &id : tasks) {
+            if (stopping)
+              break;
+            messaging::Rabbit destination(id.at("topic"));
+            destination.Publish(id.at("key"));
+            store.Published(id);
           }
-          if (job->cancel || std::chrono::steady_clock::now() > deadline) {
-            timeout = !job->cancel;
-            kill(-pid, SIGKILL);
-            while (waitpid(pid, &code, 0) < 0 && errno == EINTR) {
-            }
-            break;
-          }
-          std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        }
-        if (!timeout && !job->cancel) {
-          if (!WIFEXITED(code) || WEXITSTATUS(code))
-            throw std::runtime_error("media executor failed");
-          result = readJson(output);
-          if (!result.value("success", false))
-            error = result.value("error", "media failed");
+          pause();
         }
       } catch (const std::exception &e) {
-        error = e.what();
+        std::cerr << "[RabbitMQ publisher] " << e.what() << std::endl;
+        pause();
       }
-      {
-        std::lock_guard<std::mutex> lock(mutex);
-        auto state = job->cancel                 ? "cancelled"
-                     : timeout || !error.empty() ? "failed"
-                                                 : "succeeded";
-        job->status["state"] = state;
-        job->status["success"] = std::string(state) == "succeeded";
-        job->status["error"] = timeout ? "execution timeout" : error;
-        if (state == std::string("succeeded"))
-          job->status["result"] = result;
+    }
+  }
+  void publishEvents() {
+    while (!stopping) {
+      try {
+        messaging::Kafka kafka;
+        while (!stopping) {
+          for (auto &event : store.Events()) {
+            if (stopping)
+              break;
+            kafka.Publish(event.at("key"), event.at("payload"),
+                          event.at("topic"));
+            store.EventSent(event);
+          }
+          pause();
+        }
+      } catch (const std::exception &e) {
+        std::cerr << "[Kafka outbox] " << e.what() << std::endl;
+        pause();
+      }
+    }
+  }
+  json execute(const json &request, const std::function<bool()> &cancelled) {
+    json result;
+    std::string error;
+    bool timeout = false;
+    try {
+      auto work =
+          mediaDirectory(request.at("session_id"), request.at("media_id")) /
+          "jobs" / request.at("job_id").get<std::string>() /
+          ("attempt-" +
+           std::to_string(request.at("execution_version").get<uint64_t>()));
+      fs::create_directories(work);
+      auto input = work / "request.json", output = work / "result.json";
+      atomicWrite(input, request.dump());
+      std::vector<std::string> args = {
+          env("MCP_MEDIA_EXECUTOR", "mcp_media_executor"), input.string(),
+          output.string(), std::to_string(getpid())};
+      std::vector<char *> argv;
+      for (auto &arg : args)
+        argv.push_back(arg.data());
+      argv.push_back(nullptr);
+      posix_spawnattr_t attr;
+      posix_spawnattr_init(&attr);
+      posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP);
+      posix_spawnattr_setpgroup(&attr, 0);
+      posix_spawn_file_actions_t actions;
+      posix_spawn_file_actions_init(&actions);
+      auto log = work / "execution.log";
+      posix_spawn_file_actions_addopen(&actions, 1, log.c_str(),
+                                       O_WRONLY | O_CREAT | O_TRUNC, 0600);
+      posix_spawn_file_actions_adddup2(&actions, 1, 2);
+      pid_t pid;
+      auto rc =
+          posix_spawnp(&pid, argv[0], &actions, &attr, argv.data(), environ);
+      posix_spawnattr_destroy(&attr);
+      posix_spawn_file_actions_destroy(&actions);
+      if (rc)
+        throw std::runtime_error("cannot start MCP_MEDIA_EXECUTOR");
+      int code;
+      auto deadline =
+          std::chrono::steady_clock::now() +
+          std::chrono::seconds(request.value("timeout_seconds", 600));
+      for (;;) {
+        auto r = waitpid(pid, &code, WNOHANG);
+        if (r == pid)
+          break;
+        if (r < 0) {
+          if (errno == EINTR)
+            continue;
+          throw std::runtime_error("wait failed");
+        }
+        if (stopping || cancelled() ||
+            std::chrono::steady_clock::now() > deadline) {
+          timeout = !cancelled() && !stopping;
+          kill(-pid, SIGKILL);
+          while (waitpid(pid, &code, 0) < 0 && errno == EINTR) {
+          }
+          break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      }
+      if (!stopping && !timeout && !cancelled()) {
+        if (!WIFEXITED(code) || WEXITSTATUS(code))
+          throw std::runtime_error("media executor failed");
+        result = readJson(output);
+        if (!result.value("success", false))
+          error = result.value("error", "media failed");
+      }
+    } catch (const std::exception &e) {
+      error = e.what();
+    }
+    if (stopping)
+      return nullptr;
+    if (cancelled())
+      return {{"success", false},
+              {"error", "cancelled by caller"},
+              {"cancelled", true}};
+    if (timeout)
+      return {{"success", false}, {"error", "execution timeout"}};
+    if (!error.empty())
+      return {{"success", false}, {"error", error}};
+    return result;
+  }
+  void consume() {
+    while (!stopping) {
+      try {
+        messaging::Rabbit broker;
+        while (!stopping) {
+          auto delivery = broker.Fetch();
+          if (delivery.id.empty()) {
+            pause();
+            continue;
+          }
+          if (!id(delivery.id)) {
+            broker.Reject(delivery.tag);
+            continue;
+          }
+          auto request = store.Claim(delivery.id);
+          if (request.is_null()) {
+            broker.Ack(delivery.tag);
+            continue;
+          }
+          if (request.value("busy", false)) {
+            broker.Requeue(delivery.tag);
+            pause();
+            continue;
+          }
+          if (request.value("exhausted", false)) {
+            broker.Reject(delivery.tag);
+            continue;
+          }
+          auto version = request.at("execution_version").get<uint64_t>();
+          auto nextRenew = std::chrono::steady_clock::now();
+          bool lost = false;
+          auto valid = [&] {
+            if (lost)
+              return false;
+            if (std::chrono::steady_clock::now() < nextRenew)
+              return true;
+            try {
+              lost = !store.Renew(delivery.id, version);
+            } catch (...) {
+              lost = true;
+            }
+            nextRenew = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(std::max(
+                            500, std::stoi(env("MCP_JOB_LEASE_SECONDS", "15")) *
+                                     1000 / 3));
+            return !lost;
+          };
+          auto result = execute(request, [&] { return !valid(); });
+          if (stopping)
+            break;
+          auto state = result.value("cancelled", false) ? "cancelled"
+                       : result.value("success", false) ? "succeeded"
+                                                        : "failed";
+          json status = {{"success", std::string(state) == "succeeded"},
+                         {"job_id", delivery.id},
+                         {"state", state},
+                         {"worker", "rabbitmq-consumer"},
+                         {"error", result.value("error", "")}};
+          if (result.value("success", false))
+            status["result"] = result;
+          const auto completion = store.Complete(delivery.id, version, status);
+          if (completion == messaging::JobStore::Completion::stale ||
+              completion == messaging::JobStore::Completion::retry_queued) {
+            broker.Ack(delivery.tag);
+            continue;
+          }
+          if (completion == messaging::JobStore::Completion::exhausted)
+            broker.Reject(delivery.tag);
+          else
+            broker.Ack(delivery.tag);
+        }
+      } catch (const std::exception &e) {
+        std::cerr << "[RabbitMQ consumer] " << e.what() << std::endl;
+        pause();
       }
     }
   }
@@ -143,25 +249,10 @@ json MediaBackend::Call(const std::string &tool, const json &args) {
   auto session = args.at("session_id").get<std::string>();
   if (!id(session))
     throw std::invalid_argument("invalid session");
-  std::lock_guard<std::mutex> lock(impl->mutex);
-  if (tool == "avplayer_job_get" || tool == "avplayer_job_cancel") {
-    auto it = impl->jobs.find(args.at("job_id"));
-    if (it == impl->jobs.end() || it->second->request["session_id"] != session)
-      return {{"success", false}, {"error", "job not found"}};
-    auto job = it->second;
-    if (tool == "avplayer_job_cancel" && (job->status["state"] == "queued" ||
-                                          job->status["state"] == "running")) {
-      job->cancel = true;
-      if (job->status["state"] == "queued") {
-        job->status["state"] = "cancelled";
-        job->status["success"] = false;
-        impl->queue.erase(
-            std::remove(impl->queue.begin(), impl->queue.end(), job),
-            impl->queue.end());
-      }
-    }
-    return job->status;
-  }
+  if (tool == "avplayer_job_get" || tool == "avplayer_job_cancel")
+    return impl->store.Get(args.at("job_id"), session,
+                           tool == "avplayer_job_cancel");
+  std::lock_guard<std::mutex> lock(impl->artifacts);
   auto media = args.at("media_id").get<std::string>();
   auto dir = mediaDirectory(session, media);
   auto arguments = args.value("arguments", json::object());
@@ -227,27 +318,6 @@ json MediaBackend::Call(const std::string &tool, const json &args) {
   json request = {{"job_id", jobID},        {"session_id", session},
                   {"media_id", media},      {"task", tool},
                   {"arguments", arguments}, {"timeout_seconds", timeout}};
-  auto existing = impl->jobs.find(jobID);
-  if (existing != impl->jobs.end()) {
-    if (existing->second->request != request)
-      throw std::invalid_argument("job_id input conflict");
-    return existing->second->status;
-  }
-  if (impl->queue.size() >= 16 || impl->jobs.size() >= 4096)
-    throw std::runtime_error("MCP media queue/retained limit reached");
-  if (fs::exists(dir / "jobs" / jobID / "request.json"))
-    throw std::runtime_error(
-        "execution record exists; explicit recovery required");
-  auto job = std::make_shared<Impl::Job>();
-  job->request = request;
-  job->status = {{"success", true},
-                 {"job_id", jobID},
-                 {"state", "queued"},
-                 {"worker", "mcp-local"},
-                 {"error", ""}};
-  impl->jobs[jobID] = job;
-  impl->queue.push_back(job);
-  impl->cv.notify_one();
-  return job->status;
+  return impl->store.Submit(request);
 }
 } // namespace mcp

@@ -10,7 +10,8 @@
 #include <thread>
 extern char **environ;
 using namespace avtools;
-void process(std::vector<std::string> args, const fs::path &stdoutFile = {}) {
+void process(std::vector<std::string> args, const fs::path &stdoutFile = {})
+{
   std::vector<char *> argv;
   for (auto &arg : args)
     argv.push_back(arg.data());
@@ -27,18 +28,21 @@ void process(std::vector<std::string> args, const fs::path &stdoutFile = {}) {
   if (rc)
     throw std::runtime_error("cannot execute " + args.front());
   int status;
-  while (waitpid(pid, &status, 0) < 0) {
+  while (waitpid(pid, &status, 0) < 0)
+  {
     if (errno != EINTR)
       throw std::runtime_error("waitpid failed");
   }
   if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
     throw std::runtime_error(args.front() + " failed; see execution.log");
 }
-void ffmpeg(std::vector<std::string> args) {
+void ffmpeg(std::vector<std::string> args)
+{
   args.insert(args.begin(), {"ffmpeg", "-nostdin", "-y", "-loglevel", "error"});
   process(std::move(args));
 }
-json execute(const json &request, const fs::path &work) {
+json execute(const json &request, const fs::path &work)
+{
   auto session = request.at("session_id").get<std::string>(),
        media = request.at("media_id").get<std::string>(),
        job = request.at("job_id").get<std::string>(),
@@ -53,16 +57,18 @@ json execute(const json &request, const fs::path &work) {
     throw std::invalid_argument("job outside storage");
   fs::create_directories(stage);
   auto args = request.value("arguments", json::object());
-  auto publish = [&](const fs::path &file, bool clip) {
+  auto publish = [&](const fs::path &file, bool clip)
+  {
     auto targetDir = clip ? dir / "clips" : dir;
     if (!inside(root(), targetDir))
       throw std::invalid_argument("artifact directory outside storage");
     fs::create_directories(targetDir);
-    auto target = targetDir / (job + "-" + file.filename().string());
+    auto target = targetDir / (job + "-v" + std::to_string(request.at("execution_version").get<uint64_t>()) + "-" + file.filename().string());
     fs::rename(file, target);
     return target.string();
   };
-  if (task == "extract_audio" || task == "transcribe_subtitle") {
+  if (task == "extract_audio" || task == "transcribe_subtitle")
+  {
     auto audio = stage / "audio.mp3";
     ffmpeg({"-i", source.string(), "-vn", "-ac", "1", "-ar", "16000", "-b:a",
             "32k", audio.string()});
@@ -83,7 +89,8 @@ json execute(const json &request, const fs::path &work) {
       throw std::runtime_error(value.value("error", "inference failed"));
     return value;
   }
-  if (task == "transcode_video") {
+  if (task == "transcode_video")
+  {
     int height = args.value("height", 720);
     if (height != 360 && height != 480 && height != 720 && height != 1080)
       throw std::invalid_argument("height must be 360,480,720,1080");
@@ -105,16 +112,22 @@ json execute(const json &request, const fs::path &work) {
   int64_t length = static_cast<int64_t>(
       std::stod(data.at("format").at("duration").get<std::string>()) * 1000);
   auto ranges = json::array();
-  if (task == "export_plan") {
+  if (task == "export_plan")
+  {
     ranges = args.value("segments", json::array());
     if (!ranges.is_array() || ranges.empty() || ranges.size() > 5)
       throw std::invalid_argument("plan must contain 1..5 segments");
-  } else {
+  }
+  else
+  {
     int64_t start = 0, end = 0;
-    if (args.contains("start_ms") || args.contains("end_ms")) {
+    if (args.contains("start_ms") || args.contains("end_ms"))
+    {
       start = args.value("start_ms", int64_t(0));
       end = args.value("end_ms", int64_t(0));
-    } else {
+    }
+    else
+    {
       auto duration = args.value("duration_ms", int64_t(0));
       if (duration <= 0 || duration > length || duration > 600000)
         throw std::invalid_argument("valid range or duration_ms required");
@@ -126,7 +139,8 @@ json execute(const json &request, const fs::path &work) {
     ranges.push_back({{"start_ms", start}, {"end_ms", end}});
   }
   // Validate entire plan before encoding or publishing any clip.
-  for (const auto &range : ranges) {
+  for (const auto &range : ranges)
+  {
     auto start = range.at("start_ms").get<int64_t>(),
          end = range.at("end_ms").get<int64_t>();
     if (start < 0 || end <= start || end > length || end - start > 600000)
@@ -134,7 +148,8 @@ json execute(const json &request, const fs::path &work) {
   }
   int index = 0;
   std::vector<fs::path> outputs;
-  for (const auto &range : ranges) {
+  for (const auto &range : ranges)
+  {
     auto start = range.at("start_ms").get<int64_t>(),
          end = range.at("end_ms").get<int64_t>();
     auto output = stage / ("clip-" + std::to_string(++index) + ".mp4");
@@ -144,7 +159,8 @@ json execute(const json &request, const fs::path &work) {
             "+faststart", output.string()});
     outputs.push_back(output);
   }
-  if (task == "export_plan") {
+  if (task == "export_plan")
+  {
     json paths = json::array();
     for (auto &path : outputs)
       paths.push_back(publish(path, true));
@@ -158,28 +174,36 @@ json execute(const json &request, const fs::path &work) {
           {"end_ms", end},
           {"duration_ms", end - start}};
 }
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
   if (argc != 4)
     return 2;
   auto parent = std::stol(argv[3]);
-  std::thread([parent] {
+  std::thread([parent]
+              {
     for (;;) {
       if (getppid() != parent)
         kill(0, SIGKILL);
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-  }).detach();
+    } })
+      .detach();
   json result;
-  try {
+  try
+  {
     auto request = readJson(argv[1]);
     result = execute(request, fs::path(argv[1]).parent_path());
-  } catch (const std::exception &e) {
+  }
+  catch (const std::exception &e)
+  {
     result = {{"success", false}, {"error", e.what()}};
   }
-  try {
+  try
+  {
     atomicWrite(argv[2], result.dump());
     return 0;
-  } catch (...) {
+  }
+  catch (...)
+  {
     return 1;
   }
 }

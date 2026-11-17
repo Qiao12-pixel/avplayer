@@ -35,6 +35,43 @@ services:
       - redis
       - mysql
 
+  rabbitmq:
+    image: rabbitmq:4.2-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${MCP_RABBIT_USER:-avplayer}
+      RABBITMQ_DEFAULT_PASS: ${MCP_RABBIT_PASSWORD:-avplayer-dev}
+    ports:
+      - "127.0.0.1:${MCP_RABBIT_PORT:-5672}:5672"
+      - "127.0.0.1:${MCP_RABBIT_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  kafka:
+    image: apache/kafka:4.1.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://${MCP_KAFKA_ADVERTISED_HOST:-127.0.0.1}:${MCP_KAFKA_PORT:-9092}
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    ports:
+      - "127.0.0.1:${MCP_KAFKA_PORT:-9092}:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--save", "", "--appendonly", "no"]
@@ -73,9 +110,14 @@ services:
       context: ..
       dockerfile: deploy/server.Dockerfile
     image: avplayer-server:local
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       AVPLAYER_PROJECT_ROOT: /app
       AVPLAYER_STORAGE_ROOT: /data/storage
+      AVPLAYER_KAFKA_BROKERS: ${AVPLAYER_KAFKA_BROKERS:-host.docker.internal:9092}
+      AVPLAYER_KAFKA_TOPIC: ${AVPLAYER_KAFKA_TOPIC:-avplayer.playback.events}
+      AVPLAYER_STATS_PROJECTION: ${AVPLAYER_STATS_PROJECTION:-playback-v1}
       AVPLAYER_AGENT_SERVER: agent:50061
       AVPLAYER_DATA_SERVER: localhost:50066
       AVPLAYER_DATA_SERVER_ADDRESS: 0.0.0.0:50066
@@ -97,6 +139,20 @@ services:
     depends_on:
       - redis
       - mysql
+    restart: unless-stopped
+
+  playback-stats:
+    image: avplayer-server:local
+    entrypoint: ["/build/playback_event_consumer"]
+    environment:
+      AVPLAYER_MYSQL_DSN: mysql://avplayer:${AVPLAYER_MYSQL_PASSWORD:-avplayer}@mysql:3306/avplayer
+      AVPLAYER_KAFKA_BROKERS: ${AVPLAYER_KAFKA_BROKERS:-host.docker.internal:9092}
+      AVPLAYER_KAFKA_TOPIC: ${AVPLAYER_KAFKA_TOPIC:-avplayer.playback.events}
+      AVPLAYER_STATS_PROJECTION: ${AVPLAYER_STATS_PROJECTION:-playback-v1}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - server
     restart: unless-stopped
 
   web:
@@ -123,5 +179,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  rabbitmq-data:
+  kafka-data:
   ollama-models:
   mysql-data:

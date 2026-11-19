@@ -3,6 +3,7 @@
 #include "integrations/mcp/WeatherService.h"
 #include "network/websocket/WebSocketSession.h"
 #include "rpc/MediaRouter.h"
+#include "rpc/UploadService.h"
 namespace avserver::network {
 class HttpSession : public std::enable_shared_from_this<HttpSession> {
   beast::tcp_stream stream;
@@ -12,10 +13,9 @@ class HttpSession : public std::enable_shared_from_this<HttpSession> {
   MediaRouter &router;
   std::array<char, 65536> chunk{};
   std::string body;
-  grpc::ClientContext uploadContext;
   api::MediaHandle handle;
-  std::unique_ptr<api::MediaService::Stub> uploader;
-  std::unique_ptr<grpc::ClientWriter<api::MediaChunk>> upload;
+  UploadService &uploads;
+  std::unique_ptr<UploadTransaction> upload;
   void reply(unsigned code, json data) {
     auto r = std::make_shared<http::response<http::string_body>>(
         http::status(code), 11);
@@ -76,14 +76,11 @@ class HttpSession : public std::enable_shared_from_this<HttpSession> {
     net::post(workers, [self] {
       try {
         if (self->upload) {
-          self->upload->WritesDone();
-          auto s = self->upload->Finish();
-          net::post(self->stream.get_executor(), [self, s] {
-            if (s.ok())
-              self->reply(200, {{"media_id", self->handle.media_id()},
-                                {"size_bytes", self->handle.size_bytes()}});
-            else
-              self->reply(502, {{"error", s.error_message()}});
+          self->handle = self->upload->Finish();
+          self->upload.reset();
+          net::post(self->stream.get_executor(), [self] {
+            self->reply(200, {{"media_id", self->handle.media_id()},
+                              {"size_bytes", self->handle.size_bytes()}});
           });
           return;
         }
@@ -132,25 +129,28 @@ class HttpSession : public std::enable_shared_from_this<HttpSession> {
           if (ec == http::error::need_buffer)
             ec = {};
           if (ec) {
-            self->uploadContext.TryCancel();
+            self->upload.reset();
             return;
           }
           auto size = self->chunk.size() - self->parser.get().body().size;
           if (self->upload) {
             std::string bytes(self->chunk.data(), size);
             net::post(self->workers, [self, bytes] {
-              api::MediaChunk c;
-              c.set_data(bytes);
-              bool ok = bytes.empty() || self->upload->Write(c);
-              net::post(self->stream.get_executor(), [self, ok] {
-                if (!ok) {
-                  self->uploadContext.TryCancel();
-                  self->reply(502, {{"error", "upload failed"}});
-                } else if (self->parser.is_done())
-                  self->finish();
-                else
-                  self->readBody();
-              });
+              try {
+                self->upload->Write(bytes);
+                net::post(self->stream.get_executor(), [self] {
+                  if (self->parser.is_done())
+                    self->finish();
+                  else
+                    self->readBody();
+                });
+              } catch (const std::exception &error) {
+                auto message = std::string(error.what());
+                self->upload.reset();
+                net::post(self->stream.get_executor(), [self, message] {
+                  self->reply(500, {{"error", message}});
+                });
+              }
             });
           } else {
             self->body.append(self->chunk.data(), size);
@@ -167,8 +167,10 @@ class HttpSession : public std::enable_shared_from_this<HttpSession> {
   }
 
 public:
-  HttpSession(tcp::socket s, net::thread_pool &pool, MediaRouter &router)
-      : stream(std::move(s)), workers(pool), router(router) {
+  HttpSession(tcp::socket s, net::thread_pool &pool, MediaRouter &router,
+              UploadService &uploadService)
+      : stream(std::move(s)), workers(pool), router(router),
+        uploads(uploadService) {
     parser.body_limit(8ULL * 1024 * 1024 * 1024);
   }
   void run() {
@@ -274,22 +276,17 @@ public:
             }
             std::string name = DecodeUrl(std::string(req["X-File-Name"]));
             net::post(self->workers, [self, session, name] {
-              self->uploader = api::MediaService::NewStub(
-                  channel("AVPLAYER_DATA_SERVER", "localhost:50066"));
-              self->uploadContext.set_deadline(
-                  std::chrono::system_clock::now() + std::chrono::minutes(30));
-              self->upload = self->uploader->UploadMedia(&self->uploadContext,
-                                                         &self->handle);
-              api::MediaChunk first;
-              first.set_session_id(session);
-              first.set_file_name(name);
-              bool ok = self->upload->Write(first);
-              net::post(self->stream.get_executor(), [self, ok] {
-                if (ok)
+              try {
+                self->upload = self->uploads.BeginUpload(session, name);
+                net::post(self->stream.get_executor(), [self] {
                   self->readBody();
-                else
-                  self->reply(502, {{"error", "upload unavailable"}});
-              });
+                });
+              } catch (const std::exception &error) {
+                auto message = std::string(error.what());
+                net::post(self->stream.get_executor(), [self, message] {
+                  self->reply(400, {{"error", message}});
+                });
+              }
             });
             return;
           }
@@ -299,7 +296,8 @@ public:
 };
 
 void StartHttp(tcp::socket socket, net::thread_pool &workers,
-               MediaRouter &router) {
-  std::make_shared<HttpSession>(std::move(socket), workers, router)->run();
+               MediaRouter &router, UploadService &uploads) {
+  std::make_shared<HttpSession>(std::move(socket), workers, router, uploads)
+      ->run();
 }
 } // namespace avserver::network

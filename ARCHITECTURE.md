@@ -88,13 +88,14 @@ Redis/MySQL 的驱动头文件通过 PImpl 隔离，各自维护访问锁。
 
 ```text
 Web → HTTP/WS :50065 → avplayer_server
-                              ├→ 上传/数据/播放路由 gRPC :50066
+                              ├→ HTTP 分块上传 → UploadTransaction → 文件存储
+                              ├→ 数据与播放路由 gRPC :50066
                               └→ 媒体模块/集群内部 gRPC :50062
 Web/Qt ←──────── WebRTC H.264 + Opus ───────┘
 ```
 
 50065、50066、50062 都是同一 C++ 进程的监听端口，不代表三个服务。
-Web 适配层保留本进程 gRPC 桥接；单实例 MediaRouter 直接调用进程内媒体实现。
+Web 上传由 HTTP 网关直接调用共享上传事务并写文件；gRPC `UploadMedia` 仍供原生 gRPC 客户端使用。播放控制和远程媒体路由使用 gRPC；单实例 `MediaRouter` 直接调用进程内媒体实现。
 Qt 上传/远程播放默认连50066，Agent通信连50061；本地播放直接使用media-core。
 
 ### Agent 工具

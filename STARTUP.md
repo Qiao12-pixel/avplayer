@@ -268,3 +268,49 @@ docker compose -f deploy/docker-compose.yml stop mysql redis rabbitmq kafka
 ```
 
 不要使用 `docker compose down -v`，该命令会删除 Compose 数据卷。
+
+
+
+
+当前项目有三条主要数据流：媒体上传与播放、AI 工具执行、事件统计。
+
+1. 上传与实时播放
+
+浏览器 → C++ 后端 → 文件存储与数据库 → WebRTC → 浏览器。
+- 浏览器通过 HTTP 上传视频，C++ 后端保存媒体文件，生成 media_id，并登记媒体与会话信息。
+- 浏览器通过 WebSocket 发送播放信令，后端建立媒体会话，完成 SDP/ICE 协商。
+- C++ 使用 FFmpeg 处理媒体，通过 WebRTC 发送 H.264 视频和 Opus 音频。
+- 暂停、继续、Seek 等控制请求交给对应媒体会话执行。
+视频帧直接走 WebRTC，不经过 Python、MCP、RabbitMQ 或 Kafka。
+
+2. AI 请求与工具执行
+
+浏览器 → C++ 后端 → Python Agent → MCP Proxy → MCP Worker。
+- C++ 后端桥接浏览器的 Agent 消息与 Python gRPC 服务。
+- Python Agent 负责模型调用、任务规划和工具编排。
+- Agent 请求 Proxy 8090，Proxy 根据 ZooKeeper 发现的实例列表，选择 MCP Worker。
+- ZooKeeper 只提供实例地址与成员变化，不转发业务请求。
+对于抽音轨、转码、转写、导出等耗时工具，后续流程为：
+1. MCP 将任务和发布发件箱写入共享 MySQL。
+2. 发布器向 RabbitMQ 发送任务 ID。
+3. 任意空闲 MCP Worker 领取消息，通过 MySQL 原子领取任务并获取租约。
+4. C++ 执行器处理媒体；语音识别需要时调用 Python 推理。
+5. 产物写入共享媒体目录，执行结果通过租约和版本校验后写入 MySQL。
+6. Agent 轮询任务状态，再将结果返回浏览器；生成的转写、摘要等业务结果通过 C++ 数据接口持久化并供后续复用。
+接收工具请求的 MCP 实例，与最终执行耗时任务的实例，可以不同。
+
+3. 事件采集与统计
+
+业务事件 → MySQL 发件箱 → Kafka → 消费者 → MySQL。
+
+- MCP 发布任务排队、运行、重试、完成等事件，由 mcp_event_consumer 去重保存审计记录。
+- C++ 后端发布上传、播放、暂停、Seek、录制等事件，由 playback_event_consumer 更新统计。
+- 消费者先提交 MySQL 事务，再提交 Kafka offset；重放时按事件 ID 去重。
+各存储的作用如下：
+组件	保存或传输什么
+文件系统	     原始视频、音轨、字幕、剪辑和录制产物
+MySQL	    业务元数据、AI 结果、任务状态、租约、发件箱、审计与统计
+Redis	    可重建的热点结果缓存
+RabbitMQ	耗时任务分发，消息主要携带任务 ID
+Kafka	业务事件流，支持消费、统计和回放
+ZooKeeper	服务实例注册与发现 

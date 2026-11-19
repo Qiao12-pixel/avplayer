@@ -1,9 +1,10 @@
 #include "HttpServer.h"
 #include "HttpSession.h"
 #include "config/Environment.h"
+#include "rpc/UploadService.h"
 #include <iostream>
 namespace avserver::network {
-void RunHttpServer(MediaRouter &router) {
+void RunHttpServer(MediaRouter &router, UploadService &uploads) {
   net::io_context io;
   net::thread_pool workers(8);
   auto host = Environment("AVPLAYER_WEB_GATEWAY_HOST", "127.0.0.1");
@@ -15,7 +16,8 @@ void RunHttpServer(MediaRouter &router) {
     acceptor.async_accept(net::make_strand(io),
                           [&](beast::error_code ec, tcp::socket socket) {
                             if (!ec)
-                              StartHttp(std::move(socket), workers, router);
+                              StartHttp(std::move(socket), workers, router,
+                                        uploads);
                             accept();
                           });
   };

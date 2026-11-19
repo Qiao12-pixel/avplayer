@@ -1,6 +1,7 @@
 #pragma once
 class MediaRouter;
+class UploadService;
 namespace avserver::network {
-// Owns Asio listener and gRPC-bridge work pool for the unified process.
-void RunHttpServer(MediaRouter &router);
+// Owns the HTTP listener and worker pool for the unified process.
+void RunHttpServer(MediaRouter &router, UploadService &uploads);
 } // namespace avserver::network

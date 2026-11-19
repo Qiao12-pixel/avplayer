@@ -47,7 +47,7 @@ int avserver::ServerApplication::Run() {
     auto grpcServer = builder.BuildAndStart();
     if (!grpcServer)
       throw std::runtime_error("cannot start data service");
-    network::RunHttpServer(router);
+    network::RunHttpServer(router, upload);
     return 0;
   } catch (const std::exception &e) {
     std::cerr << e.what() << std::endl;

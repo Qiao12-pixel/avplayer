@@ -26,7 +26,7 @@ services/server/
     │   └── websocket/
     │       └── WebSocketSession.*    # 信令/Agent双向流、发送队列与取消
     ├── rpc/
-    │   ├── UploadService.*           # 上传gRPC、写文件、媒体绑定
+    │   ├── UploadService.*           # 共享上传事务、gRPC上传接口、文件落盘与媒体绑定
     │   ├── StorageService.*          # 数据操作校验及分发，不含SQL或Redis命令
     │   └── MediaRouter.*             # 播放会话路由、固定后端、断连清理
     ├── storage/
@@ -85,7 +85,7 @@ ctest --test-dir cmake-build-debug -R server_least_sessions_policy --output-on-f
 
 ## 保留的实现边界
 
-HTTP/WS到服务仍通过本进程gRPC桥接，单实例MediaRouter直接调用进程内媒体实现。
+Web HTTP上传由网关直接写入共享上传事务；gRPC上传接口保留给原生客户端。播放控制与远程媒体路由仍经gRPC，WebRTC信令链路不受上传实现影响。
 数据库连接沿用启动时建立、故障降级机制，没有在此次整理中增加连接池、自动重连或全异步SQL。
 负载计数仍为当前入口实例本地统计，未增加跨网关共享路由或无缝迁移。
 
